@@ -22,6 +22,9 @@ class State:
     dead: set[str] = field(default_factory=set)       # Filter kills + Analyst <70
     last_recap_day: str = ""
     benched: dict[str, float] = field(default_factory=dict)   # mint -> earliest retry (market rules)
+    # An order that has been placed but not yet recorded as a position. Written before the order
+    # goes out, cleared once the position is stored, reconciled against the chain on startup.
+    pending_entry: dict | None = None
     day_key: str = ""                                 # local day the loss limit is measured against
     day_start_equity: float = 0.0                     # equity at that day's first tick
     # Entries run on the pipeline thread and exits on the risk thread, so every mutation of
@@ -39,6 +42,7 @@ class State:
         return cls(path=path, cash=d["cash"], start_balance=d["start_balance"], session_start=d["session_start"],
                    positions=cls._load_positions(d["positions"], log),
                    traded=set(d["traded"]), dead=set(d["dead"]), benched=dict(d.get("benched") or {}),
+                   pending_entry=d.get("pending_entry") or None,
                    last_recap_day=d.get("last_recap_day", ""),
                    day_key=d.get("day_key", ""), day_start_equity=d.get("day_start_equity", 0.0))
 
@@ -72,6 +76,18 @@ class State:
         with self._lock:
             self.traded.add(pos.mint)
             self.positions[pos.mint] = pos
+            self.pending_entry = None
+            self._save_locked()
+
+    def begin_entry(self, **record) -> None:
+        """On disk before the order goes out, so a crash leaves a trail instead of a silent bag."""
+        with self._lock:
+            self.pending_entry = dict(record, ts=time.time())
+            self._save_locked()
+
+    def clear_entry(self) -> None:
+        with self._lock:
+            self.pending_entry = None
             self._save_locked()
 
     def close_position(self, mint: str) -> None:
@@ -85,6 +101,7 @@ class State:
             "cash": self.cash, "start_balance": self.start_balance, "session_start": self.session_start,
             "positions": {m: p.to_dict() for m, p in self.positions.items()},
             "traded": sorted(self.traded), "dead": sorted(self.dead), "benched": self.benched,
+            "pending_entry": self.pending_entry,
             "last_recap_day": self.last_recap_day,
             "day_key": self.day_key, "day_start_equity": self.day_start_equity,
         }, indent=1))

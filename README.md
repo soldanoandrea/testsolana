@@ -18,7 +18,7 @@ variables can't change them, so paper and live run on exactly the same rules.
 | **Scout** | Pump.fun (`pumpfun`, `pumpswap`) and Raydium pairs, 30 min–72 h old, mcap $300k–$20M. Each coin is passed to Filter once, plus once more each time a market rule benched it. | DexScreener (profiles, boosts, search) and GeckoTerminal (trending, per-DEX pools) for discovery. DexScreener for every metric. |
 | **Filter** | 8 kill rules (below). One hit is final for this look. A safety rule (1, 2, 5, 6, 7) kills the coin **for good**; a market rule (3, 4, 8) **benches** it for 30 min and it gets another look. **Missing data also kills**: if a rule can't be verified, the coin fails it. | RugCheck report, cross-checked against Solana RPC `getAccountInfo` for the authorities |
 | **Analyst** | Watches holder count for `DESK_HOLDER_WINDOW_S` (300 s), sends the coin back through Filter on fresh data, then scores it 0–100. 70+ goes to Executor, under 70 dies. | DexScreener, GeckoTerminal (unique buyers/sellers in the last hour), RugCheck holders, RPC (smart wallets) |
-| **Executor** | 5% of the current balance per trade, **at most 6 positions open at once**. One entry per coin, ever. Never averages down. Asks Risk for the stop before it orders. Refuses every entry while the desk is halted. | Paper fills or Jupiter swaps |
+| **Executor** | 5% of the current balance per trade, **at most 6 positions open at once**. One entry per coin, ever. Never averages down. Asks Risk for the stop before it orders. Refuses every entry while the desk is halted. Writes the order to `state.json` **before** placing it, so a crash between a confirmed swap and the record cannot leave an unwatched bag in the wallet. | Paper fills or Jupiter swaps |
 | **Risk** | Stop committed before the order goes in, then placed at exactly −30% from the **real fill** (paper and live land on the same number; the slippage setting cannot reach it). Stops can only move up: lowering one is blocked and logged as a violation, including a stop read back from `state.json`. At +60% from entry it switches to a trailing stop 20% under the peak, which locks in at least +25%. Exits only when the stop or the trail is hit. Checks every 10 s, and falls back to Jupiter for any coin DexScreener does not price. | DexScreener prices, Jupiter as fallback |
 | **Logger** | Logs every kill with the exact rule, and every trade with entry, size, score, exit and reason. Writes the morning recap at 08:00 local and on shutdown. | — |
 
@@ -94,10 +94,17 @@ fee. They're set with `DESK_PAPER_*`, and the starting balance with `DESK_PAPER_
 ## Going live
 
 `python -m desk run --live` refuses to start until **all** of these are true:
-- the paper log has at least 20 closed trades (`DESK_LIVE_MIN_PAPER_TRADES`)
+- the paper log has at least 20 closed trades (`rules.LIVE_MIN_CLEAN_PAPER_TRADES`)
+- those trades are **net profitable** — counting rows is not proof, and twenty losing trades used
+  to open live exactly like twenty winning ones
+- the daily loss limit **never fired** in paper
 - the paper log has **zero** rule violations
 - `DESK_CONFIRM_LIVE=yes` is set
 - `SOLANA_PRIVATE_KEY` is set (base58, for a dedicated hot wallet holding only what you can afford to lose), and `pip install solders` has been run
+
+The thresholds are constants in `rules.py`, not settings. They used to live in `config.py`, which
+meant `DESK_LIVE_MIN_PAPER_TRADES=0` opened live mode with no paper record at all. When the gate
+passes it logs `live_gate_passed` with the paper stats it accepted.
 
 Live mode buys and sells through Jupiter (`lite-api.jup.ag`) with 3% max slippage, and keeps 0.05
 SOL back for fees. The balance is the wallet's SOL in USD. If a sell fails, it's retried with
@@ -112,6 +119,11 @@ on the position so the next tick carries on widening instead of restarting at 3%
   Jupiter, so one source going down no longer silences it — but if *neither* answers, the tick is
   logged as `unprotected` and the stop simply is not checked. The desk never guesses a price and
   never sells blind to escape the uncertainty. Recap counts those ticks.
+- **A crashed entry is reconciled, not guessed.** On startup, and whenever a buy raises, the desk
+  compares its pending-order record against what the wallet actually holds: tokens held with no
+  position recorded are adopted with a fresh stop (`recovered` in the log and the recap), an order
+  that never landed burns the coin so it cannot be entered twice, and a wallet it cannot read keeps
+  the record for the next attempt. "Not confirmed" is never read as "did not happen".
 - **Stopping the desk removes the stop.** Open positions keep no stop at all once the process exits.
   Shutdown logs them as `unprotected` and the recap names them with their stop price, so you know
   what you are holding unwatched.

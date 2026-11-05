@@ -215,6 +215,86 @@ def test_sell_slippage_doubles_then_caps():
     assert sell_slippage_bps(300, -1) == 300
 
 
+class HoldingBroker(PaperBroker):
+    """A paper broker that can claim the wallet holds tokens, like a live buy that landed."""
+
+    def __init__(self, cfg, state, held=0.0, fail_buy=False):
+        super().__init__(cfg, state)
+        self.held, self.fail_buy = held, fail_buy
+
+    def held_qty(self, mint):
+        return self.held
+
+    def buy(self, mint, usd, ref_price):
+        if self.fail_buy:
+            raise DataUnavailable("swap not confirmed")
+        return super().buy(mint, usd, ref_price)
+
+
+def pending(st):
+    st.begin_entry(mint="MINT", symbol="TST", pair_address="PAIR", score=80.0, usd=50.0,
+                   stop=0.7, expected=1.0)
+
+
+def recov_exec(tmp_path, log, **kw):
+    st = State(path=tmp_path / "s.json", cash=1000.0, start_balance=1000.0)
+    return Executor(HoldingBroker(Config(data_dir=tmp_path), st, **kw), Risk(log), st, log), st
+
+
+def test_a_confirmed_buy_with_no_record_is_recovered(tmp_path, log):
+    """Tokens in the wallet that the state file never heard about: adopt them, stop and all."""
+    ex, st = recov_exec(tmp_path, log, held=49.0)
+    pending(st)
+    pos = ex.reconcile_pending()
+    assert pos is not None and st.positions["MINT"] is pos
+    assert abs(pos.entry_price - 50.0 / 49.0) < 1e-12
+    assert abs(pos.stop_price - pos.stop_floor()) < 1e-12      # the stop is running again
+    assert st.pending_entry is None and "MINT" in st.traded
+    assert [r for r in log.records if r["event"] == "recovered"]
+
+
+def test_an_order_that_never_landed_burns_the_coin(tmp_path, log):
+    ex, st = recov_exec(tmp_path, log, held=0.0)
+    pending(st)
+    assert ex.reconcile_pending() is None
+    assert not st.positions
+    assert "MINT" in st.traded and st.pending_entry is None    # cannot be entered twice
+
+
+def test_a_buy_that_raised_but_landed_is_still_recorded(tmp_path, log):
+    """'not confirmed' is not 'did not happen'."""
+    ex, st = recov_exec(tmp_path, log, held=49.0, fail_buy=True)
+    pos = ex.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+    assert pos is not None and "MINT" in st.positions
+    assert abs(pos.stop_price - pos.stop_floor()) < 1e-12
+
+
+def test_an_unreadable_wallet_keeps_the_pending_record(tmp_path, log):
+    class Blind(HoldingBroker):
+        def held_qty(self, mint):
+            raise DataUnavailable("rpc down")
+
+    st = State(path=tmp_path / "s.json", cash=1000.0, start_balance=1000.0)
+    ex = Executor(Blind(Config(data_dir=tmp_path), st), Risk(log), st, log)
+    pending(st)
+    assert ex.reconcile_pending() is None
+    assert st.pending_entry is not None          # nothing invented, nothing forgotten
+    assert not st.positions and "MINT" not in st.traded
+
+
+def test_a_normal_entry_leaves_no_pending_record(tmp_path, log):
+    ex, st = make_exec(tmp_path, log)
+    ex.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+    assert st.pending_entry is None
+
+
+def test_the_pending_record_survives_a_restart(tmp_path, log):
+    st = State(path=tmp_path / "s.json", cash=1000.0, start_balance=1000.0)
+    pending(st)
+    back = State.load(st.path, 1000.0, log=log)
+    assert back.pending_entry["mint"] == "MINT" and back.pending_entry["usd"] == 50.0
+
+
 def test_concurrent_risk_stays_inside_the_daily_limit():
     assert rules.MAX_CONCURRENT_RISK_PCT < rules.DESK_MAX_DAILY_LOSS_PCT
 

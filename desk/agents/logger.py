@@ -63,6 +63,7 @@ class Logger:
         violations = [e for e in ev if e["event"] == "violation"]
         halts = [e for e in ev if e["event"] == "halt"]
         blind = [e for e in ev if e["event"] == "unprotected" and e.get("agent") == "risk"]
+        recovered = [e for e in ev if e["event"] == "recovered"]
         fallbacks = [e for e in ev if e["event"] == "price_fallback"]
         errors = [e for e in ev if e["event"] == "error"]
 
@@ -86,6 +87,8 @@ class Logger:
         for h in halts:
             L.append(f"- **Entries halted** ({h.get('reason')}): day open ${h.get('day_open_equity'):,.2f} "
                      f"-> ${h.get('equity'):,.2f} ({h.get('drawdown_pct'):+.2f}%)")
+        for r in recovered:
+            L.append(f"- **Recovered entry** {r.get('symbol')}: held {r.get('held')} - {r.get('detail')}")
         if fallbacks:
             L.append(f"- Price fallback used (DexScreener missed, Jupiter answered): {len(fallbacks)} tick(s)")
         if blind:

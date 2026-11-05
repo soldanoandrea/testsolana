@@ -31,23 +31,40 @@ class LiveGateError(RuntimeError):
     pass
 
 
-def check_live_gate(cfg: Config) -> None:
-    """Live mode only after paper logs are clean: enough closed paper trades and zero rule violations."""
+def check_live_gate(cfg: Config) -> dict:
+    """Live mode only once paper has proved something.
+
+    Counting rows is not proof: twenty losing trades used to open live exactly like twenty
+    winning ones. The gate now also asks whether the money went up and whether the daily loss
+    limit ever had to fire. Thresholds come from rules.py, so no env var can lower the bar.
+    """
     paper_log = Logger(cfg.data_dir / "paper" / "events.jsonl", echo=False)
     ev = paper_log.events()
     closed = [e for e in ev if e["event"] == "trade_close"]
     violations = [e for e in ev if e["event"] == "violation"]
+    halts = [e for e in ev if e["event"] == "halt"]
+    recovered = [e for e in ev if e["event"] == "recovered"]
+    pnl = sum(float(e.get("pnl_usd") or 0) for e in closed)
+    wins = [e for e in closed if float(e.get("pnl_usd") or 0) > 0]
+
     problems = []
-    if len(closed) < cfg.live_min_clean_paper_trades:
-        problems.append(f"only {len(closed)} closed paper trades (need {cfg.live_min_clean_paper_trades})")
+    if len(closed) < rules.LIVE_MIN_CLEAN_PAPER_TRADES:
+        problems.append(f"only {len(closed)} closed paper trades (need {rules.LIVE_MIN_CLEAN_PAPER_TRADES})")
     if violations:
         problems.append(f"{len(violations)} rule violations in paper log")
+    if closed and pnl <= rules.LIVE_MIN_PAPER_PNL_USD:
+        problems.append(f"paper P/L is ${pnl:+,.2f} over {len(closed)} closed trades "
+                        f"({len(wins)} winners): the logic has not made money yet")
+    if halts:
+        problems.append(f"the daily loss limit fired {len(halts)} time(s) in paper")
     if os.environ.get("DESK_CONFIRM_LIVE") != "yes":
         problems.append("DESK_CONFIRM_LIVE=yes not set")
     if not os.environ.get("SOLANA_PRIVATE_KEY"):
         problems.append("SOLANA_PRIVATE_KEY not set")
     if problems:
         raise LiveGateError("live mode refused: " + "; ".join(problems))
+    return {"closed_paper_trades": len(closed), "paper_pnl_usd": round(pnl, 2),
+            "paper_winners": len(wins), "recovered_entries": len(recovered)}
 
 
 class Desk:
@@ -58,7 +75,7 @@ class Desk:
         self.log = Logger(cfg.path("events.jsonl"))
         self.state = State.load(cfg.path("state.json"), cfg.paper_start_balance_usd, log=self.log)
         if cfg.mode == "live":
-            check_live_gate(cfg)
+            self.log.log("live_gate_passed", **check_live_gate(cfg))
             self.broker = LiveBroker(cfg, self.http, self.src.rpc, os.environ["SOLANA_PRIVATE_KEY"])
             if not self.state.start_balance or self.state.start_balance == cfg.paper_start_balance_usd:
                 self.state.start_balance = self.state.cash = self.broker.balance_usd()
@@ -79,6 +96,9 @@ class Desk:
         self.risk = Risk(self.log)
         self.executor = Executor(self.broker, self.risk, self.state, self.log)
         self.scout.seen |= self.state.dead | self.state.traded
+        # An order may have gone out without its position reaching the file. Settle that first:
+        # until it is settled there could be a bag in the wallet with no stop watching it.
+        self.executor.reconcile_pending()
 
     # ---------------------------------------------------------------- pipeline
     def pipeline_tick(self) -> None:

@@ -59,6 +59,12 @@ assert sum(ANALYST_WEIGHTS.values()) == 100
 EXECUTOR_MAX_POSITION_PCT = 5.0   # of current balance, per trade
 EXECUTOR_MAX_OPEN_POSITIONS = 6   # hard cap on positions held at the same time
 
+# ---- LIVE GATE -----------------------------------------------------------
+# Paper has to have proved something, not just produced rows. Constants, not config: the gate
+# that stands between the logic and real money is not something an env var gets to loosen.
+LIVE_MIN_CLEAN_PAPER_TRADES = 20
+LIVE_MIN_PAPER_PNL_USD = 0.0      # net P/L over those closed trades must be above this
+
 # ---- RISK ----------------------------------------------------------------
 # A memecoin at $1-5M mcap moves 6% on noise alone, so a 6% stop is a coin flip
 # charged 3.6% round-trip friction. The stop is wide enough to survive the noise

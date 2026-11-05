@@ -36,7 +36,8 @@ class Config:
 
     # live
     live_slippage_bps: int = int(_env("DESK_LIVE_SLIPPAGE_BPS", "300"))
-    live_min_clean_paper_trades: int = int(_env("DESK_LIVE_MIN_PAPER_TRADES", "20"))
+    # NOTE: the live gate's thresholds are in rules.py on purpose. They used to be here, which
+    # meant DESK_LIVE_MIN_PAPER_TRADES=0 opened live mode with no paper record at all.
 
     # smart wallets: one base58 address per line, '#' comments allowed
     smart_wallets_file: Path = Path(_env("DESK_SMART_WALLETS", "smart_wallets.txt"))

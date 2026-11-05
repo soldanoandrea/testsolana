@@ -32,6 +32,10 @@ class PaperBroker:
     def balance_usd(self) -> float:
         return self.state.cash
 
+    def held_qty(self, mint: str) -> float:
+        """Paper never holds anything the state file does not already know about."""
+        return 0.0
+
     def expected_buy_price(self, mint: str, usd: float, ref_price: float) -> float:
         return ref_price * (1 + self.cfg.paper_slippage_pct / 100)
 
@@ -97,6 +101,9 @@ class LiveBroker:
     def balance_usd(self) -> float:
         sol = max(self.rpc.sol_balance(self.owner) - self.SOL_RESERVE, 0.0)
         return sol * self.sol_price()
+
+    def held_qty(self, mint: str) -> float:
+        return self.rpc.token_balance(self.owner, mint)
 
     def expected_buy_price(self, mint: str, usd: float, ref_price: float) -> float:
         lamports = int(usd / self.sol_price() * 1e9)

@@ -53,10 +53,16 @@ class Executor:
             expected = self.broker.expected_buy_price(p.mint, size, p.price_usd)
             committed = self.risk.stop_for(expected)
             self.log.log("stop_set", mint=p.mint, symbol=p.symbol, expected_entry=expected, stop=committed)
+            # On disk BEFORE the order goes out. Between a confirmed buy and the position being
+            # stored there is a window where a crash would leave tokens in the wallet that the
+            # desk knows nothing about: no stop, and not in `traded`, so it could buy them again.
+            self.state.begin_entry(mint=p.mint, symbol=p.symbol, pair_address=p.pair_address,
+                                   score=s.total, usd=size, stop=committed, expected=expected)
             fill = self.broker.buy(p.mint, size, p.price_usd)
         except (DataUnavailable, KeyError, ValueError) as e:
             self.log.log("error", agent="executor", mint=p.mint, detail=f"buy failed: {e}")
-            return None
+            # "Not confirmed" is not "did not happen": the swap may still have landed.
+            return self.reconcile_pending()
         # The stop is placed off the REAL fill, so it is exactly RISK_STOP_PCT from what we paid.
         # `committed` was quoted off the worst case allowed by slippage, so using it here would leave
         # live with a tighter stop than paper and would let DESK_LIVE_SLIPPAGE_BPS move a trading rule.
@@ -72,6 +78,46 @@ class Executor:
         assert pos.stop_price >= pos.stop_floor() - 1e-12
         self.log.log("trade_open", mint=p.mint, symbol=p.symbol, score=s.total, entry_price=fill.price,
                      size_usd=fill.usd, qty=fill.qty, stop=pos.stop_price, balance_before=balance, tx=fill.tx)
+        return pos
+
+    def reconcile_pending(self) -> Position | None:
+        """An order was placed and may not have been recorded. Ask the chain what we actually hold.
+
+        Called at startup and whenever a buy raises. Never invents a position: if the holdings
+        cannot be read, the pending record is kept so the next attempt can settle it.
+        """
+        pend = self.state.pending_entry
+        if not pend:
+            return None
+        mint = pend["mint"]
+        if mint in self.state.positions:          # already recorded; nothing to recover
+            self.state.clear_entry()
+            return self.state.positions[mint]
+        try:
+            qty = self.broker.held_qty(mint)
+        except (DataUnavailable, KeyError, ValueError) as e:
+            self.log.log("error", agent="executor", mint=mint,
+                         detail=f"cannot reconcile pending entry, keeping the record: {e}")
+            return None
+        if qty <= 0:
+            # The order never landed. Burn the coin anyway: a half-known entry is exactly where a
+            # double buy comes from, and "one entry per coin, ever" is the stricter promise.
+            self.state.traded.add(mint)
+            self.state.clear_entry()
+            self.log.log("recovered", mint=mint, symbol=pend.get("symbol"), held=0.0,
+                         detail="order never filled; coin burned so it cannot be entered twice")
+            return None
+        entry = pend["usd"] / qty                 # exactly how a fill price is computed
+        pos = Position(mint=mint, symbol=pend.get("symbol", "?"), pair_address=pend.get("pair_address", ""),
+                       score=pend.get("score", 0.0), entry_price=entry, qty=qty, cost_usd=pend["usd"],
+                       stop_price=self.risk.stop_for(entry), opened_at=pend.get("ts", time.time()),
+                       peak_price=entry)
+        self.state.open_position(pos)
+        self.log.log("recovered", mint=mint, symbol=pos.symbol, held=qty, entry_price=entry,
+                     stop=pos.stop_price, detail="tokens were held with no position recorded; "
+                                                 "adopted and the stop is running again")
+        self.log.log("trade_open", mint=mint, symbol=pos.symbol, score=pos.score, entry_price=entry,
+                     size_usd=pend["usd"], qty=qty, stop=pos.stop_price, recovered=True, tx="")
         return pos
 
     def exit(self, pos: Position, ref_price: float, reason: str) -> bool:

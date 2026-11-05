@@ -1,7 +1,10 @@
 """End-to-end: scout -> filter -> analyst -> executor -> risk -> exit, with fake market data."""
 import dataclasses
+import json
 import threading
 import time
+
+import pytest
 
 import desk.desk as deskmod
 from conftest import make_report
@@ -314,6 +317,67 @@ def test_a_sell_in_flight_is_not_started_twice(tmp_path, monkeypatch):
     assert "GOODMINT" in d.state.positions          # left to the sell already running
     assert not [e for e in d.log.events() if e["event"] == "trade_close"]
     FAKE_MARKET.reset()
+
+
+def paper_log(tmp_path, closes=20, pnl_each=1.0, extra=()):
+    """A synthetic paper log for the live gate to read."""
+    d = tmp_path / "paper"
+    d.mkdir(parents=True, exist_ok=True)
+    rows = [{"ts": 1.0 + i, "event": "trade_close", "mint": f"M{i}", "symbol": "T",
+             "pnl_usd": pnl_each, "pnl_pct": pnl_each} for i in range(closes)]
+    rows += list(extra)
+    (d / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return dataclasses.replace(Config(), data_dir=tmp_path, mode="live")
+
+
+def armed(monkeypatch):
+    monkeypatch.setenv("DESK_CONFIRM_LIVE", "yes")
+    monkeypatch.setenv("SOLANA_PRIVATE_KEY", "not-a-real-key")
+
+
+def test_gate_refuses_when_paper_lost_money(monkeypatch, tmp_path):
+    """Twenty losing trades used to open live exactly like twenty winning ones."""
+    armed(monkeypatch)
+    cfg = paper_log(tmp_path, closes=20, pnl_each=-1.0)
+    with pytest.raises(deskmod.LiveGateError) as e:
+        deskmod.check_live_gate(cfg)
+    assert "has not made money" in str(e.value)
+
+
+def test_gate_refuses_when_paper_broke_even(monkeypatch, tmp_path):
+    armed(monkeypatch)
+    cfg = paper_log(tmp_path, closes=20, pnl_each=0.0)
+    with pytest.raises(deskmod.LiveGateError):
+        deskmod.check_live_gate(cfg)
+
+
+def test_gate_refuses_after_a_daily_loss_halt(monkeypatch, tmp_path):
+    armed(monkeypatch)
+    cfg = paper_log(tmp_path, closes=20, pnl_each=1.0,
+                    extra=[{"ts": 99.0, "event": "halt", "reason": "daily_loss_limit"}])
+    with pytest.raises(deskmod.LiveGateError) as e:
+        deskmod.check_live_gate(cfg)
+    assert "daily loss limit fired" in str(e.value)
+
+
+def test_gate_passes_on_a_profitable_clean_paper_log(monkeypatch, tmp_path):
+    armed(monkeypatch)
+    cfg = paper_log(tmp_path, closes=20, pnl_each=1.5)
+    summary = deskmod.check_live_gate(cfg)
+    assert summary["closed_paper_trades"] == 20
+    assert summary["paper_pnl_usd"] == 30.0 and summary["paper_winners"] == 20
+
+
+def test_gate_thresholds_are_not_config(monkeypatch, tmp_path):
+    """DESK_LIVE_MIN_PAPER_TRADES=0 used to open live with no paper record at all."""
+    armed(monkeypatch)
+    monkeypatch.setenv("DESK_LIVE_MIN_PAPER_TRADES", "0")
+    cfg = paper_log(tmp_path, closes=0)
+    assert not hasattr(cfg, "live_min_clean_paper_trades")
+    with pytest.raises(deskmod.LiveGateError) as e:
+        deskmod.check_live_gate(cfg)
+    assert "closed paper trades" in str(e.value)
+    assert rules.LIVE_MIN_CLEAN_PAPER_TRADES == 20
 
 
 def test_live_gate_refuses_without_clean_paper(tmp_path, monkeypatch):
