@@ -86,6 +86,7 @@ class Desk:
             if v.alive:                                      # FILTER -> ANALYST
                 self.analyst.observe(v)
         self._save()
+        self._daily_guard()                                  # kill switch before any entry
         for w in self.analyst.due():                         # ANALYST window done
             fresh = self._fresh_pair(w.pair)
             if fresh is None:
@@ -114,6 +115,35 @@ class Desk:
             if r.get("pairAddress") == old.pair_address:
                 return Pair.from_dexscreener(r)
         return None
+
+    # ---------------------------------------------------------------- daily kill switch
+    def _daily_guard(self) -> None:
+        """Stop opening positions once equity is MAX_DAILY_LOSS_PCT under the day's open.
+
+        Open positions are deliberately left alone: their stops keep running. Dumping
+        them all into a falling market would realise the worst price of the day, which
+        is the opposite of protecting the balance. The halt lifts at the next local day.
+        """
+        day = datetime.now().strftime("%Y-%m-%d")
+        eq = self.equity()
+        if self.state.day_key != day:
+            with self.lock:
+                self.state.day_key = day
+                self.state.day_start_equity = eq
+                self.state.save()
+            if self.executor.halted:
+                self.log.log("resume", day=day, equity=round(eq, 2))
+            self.executor.resume()
+            self.log.log("day_open", day=day, equity=round(eq, 2))
+        base = self.state.day_start_equity
+        if base <= 0 or self.executor.halted:
+            return
+        dd = (eq / base - 1) * 100
+        if dd <= -rules.DESK_MAX_DAILY_LOSS_PCT:
+            self.executor.halt(f"daily loss limit {dd:+.1f}% (limit -{rules.DESK_MAX_DAILY_LOSS_PCT:.0f}%)")
+            self.log.log("halt", reason="daily_loss_limit", day=day, day_open_equity=round(base, 2),
+                         equity=round(eq, 2), drawdown_pct=round(dd, 2),
+                         open_positions=len(self.state.positions))
 
     # ---------------------------------------------------------------- risk
     def risk_tick(self) -> None:

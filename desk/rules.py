@@ -47,9 +47,21 @@ ANALYST_WEIGHTS = MappingProxyType({
 assert sum(ANALYST_WEIGHTS.values()) == 100
 
 # ---- EXECUTOR ------------------------------------------------------------
-EXECUTOR_MAX_POSITION_PCT = 8.0   # of current balance, per trade
+EXECUTOR_MAX_POSITION_PCT = 5.0   # of current balance, per trade
+EXECUTOR_MAX_OPEN_POSITIONS = 6   # hard cap on positions held at the same time
 
 # ---- RISK ----------------------------------------------------------------
-RISK_STOP_PCT = -6.0              # hard stop, set before the order goes in
-RISK_TRAIL_ACTIVATE_PCT = 12.0    # switch to trailing stop after +12%
-RISK_TRAIL_DISTANCE_PCT = 6.0     # trail sits 6% under the peak (never lower than the current stop)
+# A memecoin at $1-5M mcap moves 6% on noise alone, so a 6% stop is a coin flip
+# charged 3.6% round-trip friction. The stop is wide enough to survive the noise
+# and the size is cut so that a stop-out still costs ~1.5% of the balance.
+RISK_STOP_PCT = -30.0             # hard stop, set before the order goes in
+RISK_TRAIL_ACTIVATE_PCT = 60.0    # switch to trailing stop after +60%
+RISK_TRAIL_DISTANCE_PCT = 20.0    # trail sits 20% under the peak (never lower than the current stop)
+
+# ---- DESK (daily kill switch) -------------------------------------------
+DESK_MAX_DAILY_LOSS_PCT = 15.0    # equity under the day's open by this much -> no new entries today
+
+# Worst case: every open position stops out at once. It has to stay inside the
+# daily loss limit, otherwise the kill switch could never fire before the damage.
+MAX_CONCURRENT_RISK_PCT = EXECUTOR_MAX_OPEN_POSITIONS * EXECUTOR_MAX_POSITION_PCT * -RISK_STOP_PCT / 100
+assert MAX_CONCURRENT_RISK_PCT < DESK_MAX_DAILY_LOSS_PCT

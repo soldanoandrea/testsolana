@@ -59,6 +59,7 @@ class Logger:
         wins = [c for c in closes if c["pnl_usd"] > 0]
         losses = [c for c in closes if c["pnl_usd"] <= 0]
         violations = [e for e in ev if e["event"] == "violation"]
+        halts = [e for e in ev if e["event"] == "halt"]
         errors = [e for e in ev if e["event"] == "error"]
 
         L = [f"# Morning recap — {datetime.now():%Y-%m-%d %H:%M}",
@@ -77,7 +78,11 @@ class Logger:
             L.append(f"- Worst: {worst['symbol']} {worst['pnl_pct']:+.2f}% (${worst['pnl_usd']:+.2f}, {worst['reason']})")
         pnl = balance_now - start_balance
         L += [f"- Final balance: **${balance_now:,.2f}** (start ${start_balance:,.2f}, {pnl:+,.2f})",
-              f"- Rule violations blocked: {len(violations)}   Data errors: {len(errors)}", ""]
+              f"- Rule violations blocked: {len(violations)}   Data errors: {len(errors)}"]
+        for h in halts:
+            L.append(f"- **Entries halted** ({h.get('reason')}): day open ${h.get('day_open_equity'):,.2f} "
+                     f"-> ${h.get('equity'):,.2f} ({h.get('drawdown_pct'):+.2f}%)")
+        L.append("")
         if closes or opens:
             L += ["## Trades", "| coin | score | entry | size $ | exit | P/L % | reason |", "|---|---|---|---|---|---|---|"]
             closed_by_mint = {c["mint"]: c for c in closes}

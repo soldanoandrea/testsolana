@@ -4,6 +4,7 @@ import time
 
 import desk.desk as deskmod
 from conftest import make_report
+from desk import rules
 from desk.config import Config
 
 
@@ -63,11 +64,11 @@ def test_full_cycle(tmp_path, monkeypatch):
     d.pipeline_tick()                      # re-filter + score + enter
     assert "GOODMINT" in d.state.positions, [e for e in d.log.events() if e["event"] in ("score", "kill")]
     pos = d.state.positions["GOODMINT"]
-    assert abs(pos.cost_usd - 80) < 1e-9
+    assert abs(pos.cost_usd - 50) < 1e-9
 
-    FAKE_MARKET.price = 1.30; d.risk_tick()   # trail on
+    FAKE_MARKET.price = 1.70; d.risk_tick()   # +67% over the ~1.019 fill -> trail on
     assert pos.trailing
-    FAKE_MARKET.price = 1.20; d.risk_tick()   # 1.30*0.94=1.222 -> trailing stop exit
+    FAKE_MARKET.price = 1.35; d.risk_tick()   # 1.70*0.80=1.36 -> trailing stop exit
     assert not d.state.positions
     ev = d.log.events()
     close = [e for e in ev if e["event"] == "trade_close"][0]
@@ -78,6 +79,44 @@ def test_full_cycle(tmp_path, monkeypatch):
     recap = d.write_recap(since=0)
     assert "W/L: **1/0**" in recap and "Trades opened: **1**" in recap
     assert not [e for e in ev if e["event"] == "violation"]
+
+
+def test_daily_loss_limit_halts_entries(tmp_path, monkeypatch):
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+
+    d._daily_guard()                                   # records the day's opening equity
+    assert d.state.day_start_equity == 1000.0 and not d.executor.halted
+
+    d.state.cash = 1000.0 * (1 - rules.DESK_MAX_DAILY_LOSS_PCT / 100) - 1.0   # a bad day
+    d._daily_guard()
+    assert d.executor.halted
+    halt = [e for e in d.log.events() if e["event"] == "halt"][0]
+    assert halt["reason"] == "daily_loss_limit" and halt["drawdown_pct"] < -rules.DESK_MAX_DAILY_LOSS_PCT
+    assert "Entries halted" in d.write_recap(since=0)
+
+    d.state.day_key = "1970-01-01"                     # next local day lifts the halt and re-bases
+    d._daily_guard()
+    assert not d.executor.halted
+    assert d.state.day_start_equity == d.state.cash
+
+
+def test_loss_limit_leaves_open_positions_alone(tmp_path, monkeypatch):
+    """The kill switch stops buying; it must not market-sell what is already open."""
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    FAKE_MARKET.price = 1.0
+    d.pipeline_tick()
+    d.analyst.watching["GOODMINT"].t0 -= 600
+    d.pipeline_tick()
+    assert "GOODMINT" in d.state.positions
+    d.state.day_start_equity = d.equity() * 10        # pretend a huge drawdown
+    d._daily_guard()
+    assert d.executor.halted
+    assert "GOODMINT" in d.state.positions            # still held, stop still running
+    assert not [e for e in d.log.events() if e["event"] == "trade_close"]
 
 
 def test_live_gate_refuses_without_clean_paper(tmp_path, monkeypatch):

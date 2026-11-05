@@ -19,6 +19,8 @@ class State:
     traded: set[str] = field(default_factory=set)     # one entry per coin, ever
     dead: set[str] = field(default_factory=set)       # Filter kills + Analyst <70
     last_recap_day: str = ""
+    day_key: str = ""                                 # local day the loss limit is measured against
+    day_start_equity: float = 0.0                     # equity at that day's first tick
 
     @classmethod
     def load(cls, path: Path, start_balance: float) -> "State":
@@ -29,7 +31,8 @@ class State:
         d = json.loads(path.read_text())
         return cls(path=path, cash=d["cash"], start_balance=d["start_balance"], session_start=d["session_start"],
                    positions={m: Position(**p) for m, p in d["positions"].items()},
-                   traded=set(d["traded"]), dead=set(d["dead"]), last_recap_day=d.get("last_recap_day", ""))
+                   traded=set(d["traded"]), dead=set(d["dead"]), last_recap_day=d.get("last_recap_day", ""),
+                   day_key=d.get("day_key", ""), day_start_equity=d.get("day_start_equity", 0.0))
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
@@ -37,5 +40,6 @@ class State:
             "cash": self.cash, "start_balance": self.start_balance, "session_start": self.session_start,
             "positions": {m: p.to_dict() for m, p in self.positions.items()},
             "traded": sorted(self.traded), "dead": sorted(self.dead), "last_recap_day": self.last_recap_day,
+            "day_key": self.day_key, "day_start_equity": self.day_start_equity,
         }, indent=1))
         tmp.replace(self.path)

@@ -1,6 +1,8 @@
-"""EXECUTOR: max 8% of current balance per trade, one entry per coin, never averages down."""
+"""EXECUTOR: capped size per trade, capped number of open positions, one entry per coin,
+never averages down. The desk can halt entries entirely (daily loss limit)."""
 from __future__ import annotations
 
+import math
 import time
 
 from .. import rules
@@ -11,9 +13,19 @@ from ..models import Position, Score
 class Executor:
     def __init__(self, broker, risk, state, logger):
         self.broker, self.risk, self.state, self.log = broker, risk, state, logger
+        self.halted = False
+        self.halt_reason = ""
 
     def size_for(self, balance: float) -> float:
-        return round(balance * rules.EXECUTOR_MAX_POSITION_PCT / 100, 2)
+        """Floor to whole cents: round() can round UP and breach the cap by half a cent."""
+        return math.floor(balance * rules.EXECUTOR_MAX_POSITION_PCT) / 100.0
+
+    def halt(self, reason: str) -> None:
+        """Refuse every new entry until resume(). Open positions keep their stops."""
+        self.halted, self.halt_reason = True, reason
+
+    def resume(self) -> None:
+        self.halted, self.halt_reason = False, ""
 
     def enter(self, s: Score) -> Position | None:
         p = s.pair
@@ -22,6 +34,13 @@ class Executor:
             return None
         if p.mint in self.state.traded or p.mint in self.state.positions:
             self.log.log("skip", mint=p.mint, symbol=p.symbol, reason="one entry per coin — already traded")
+            return None
+        if self.halted:
+            self.log.log("skip", mint=p.mint, symbol=p.symbol, reason=f"entries halted — {self.halt_reason}")
+            return None
+        if len(self.state.positions) >= rules.EXECUTOR_MAX_OPEN_POSITIONS:
+            self.log.log("skip", mint=p.mint, symbol=p.symbol,
+                         reason=f"max {rules.EXECUTOR_MAX_OPEN_POSITIONS} open positions")
             return None
         try:
             balance = self.broker.balance_usd()
