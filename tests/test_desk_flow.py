@@ -6,6 +6,7 @@ import desk.desk as deskmod
 from conftest import make_report
 from desk import rules
 from desk.config import Config
+from desk.http import DataUnavailable
 
 
 def ds_pair(mint, price, created_s_ago=3 * 3600, **kw):
@@ -18,18 +19,33 @@ def ds_pair(mint, price, created_s_ago=3 * 3600, **kw):
 
 
 class Market:
-    def __init__(self): self.price = 1.0; self.holders = 1000
+    def __init__(self):
+        self.price = 1.0
+        self.holders = 1000
+        self.dex_down = False
+        self.jup_down = False
+
+    def reset(self):
+        self.price, self.holders, self.dex_down, self.jup_down = 1.0, 1000, False, False
 
 
 class FakeSources:
-    def __init__(self, http, rpc_url, market=None):
+    def __init__(self, http, rpc_url, jupiter_base=None):
         m = self.market = FAKE_MARKET
-        outer = self
 
         class Dex:
             def discover_mints(self): return {"GOODMINT"}
             def pairs_for_mints(self, mints): return [ds_pair("GOODMINT", m.price)] if "GOODMINT" in mints else []
-            def prices(self, mints): return {"GOODMINT": {"price": m.price}}
+            def prices(self, mints):
+                if m.dex_down:
+                    raise DataUnavailable("dexscreener down")
+                return {"GOODMINT": {"price": m.price}}
+
+        class Jup:
+            def prices(self, mints):
+                if m.jup_down:
+                    raise DataUnavailable("jupiter down")
+                return {x: {"price": m.price, "source": "jupiter"} for x in mints}
 
         class GT:
             def discover_mints(self): return set()
@@ -44,7 +60,7 @@ class FakeSources:
             def mint_info(self, mint): return {"mintAuthority": None, "freezeAuthority": None, "decimals": 6}
             def token_balance(self, o, mint): return 1.0
 
-        self.dex, self.gt, self.rug, self.rpc = Dex(), GT(), Rug(), RPC()
+        self.dex, self.gt, self.rug, self.rpc, self.jup = Dex(), GT(), Rug(), RPC(), Jup()
 
 
 FAKE_MARKET = Market()
@@ -138,6 +154,57 @@ def test_day_baseline_waits_for_a_real_mark(tmp_path, monkeypatch):
     d.risk_tick()                           # first real mark
     d._daily_guard()
     assert d.state.day_key != "1970-01-01" and d.state.day_start_equity > 0
+
+
+def open_one(tmp_path, monkeypatch):
+    """A desk with exactly one open position, at a ~1.019 fill."""
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    d.pipeline_tick()
+    d.analyst.watching["GOODMINT"].t0 -= 600
+    d.pipeline_tick()
+    assert "GOODMINT" in d.state.positions
+    return d, d.state.positions["GOODMINT"]
+
+
+def test_stop_still_fires_when_dexscreener_is_down(tmp_path, monkeypatch):
+    """One source down must not silence the stop monitor."""
+    d, pos = open_one(tmp_path, monkeypatch)
+    try:
+        FAKE_MARKET.dex_down = True
+        FAKE_MARKET.price = pos.stop_price * 0.99      # under the stop
+        d.risk_tick()
+        assert not d.state.positions, "the stop must fire off the fallback price"
+        ev = d.log.events()
+        assert [e for e in ev if e["event"] == "price_fallback"]
+        assert [e for e in ev if e["event"] == "trade_close"][0]["reason"] == "stop_loss"
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_both_price_sources_down_is_logged_not_guessed(tmp_path, monkeypatch):
+    """With no price anywhere the desk holds and says so; it never sells blind."""
+    d, _ = open_one(tmp_path, monkeypatch)
+    try:
+        FAKE_MARKET.dex_down = FAKE_MARKET.jup_down = True
+        d.risk_tick()
+        assert "GOODMINT" in d.state.positions
+        u = [e for e in d.log.events() if e["event"] == "unprotected" and e.get("agent") == "risk"]
+        assert u and u[0]["mints"] == ["GOODMINT"]
+        assert not [e for e in d.log.events() if e["event"] == "trade_close"]
+        assert "Stop not checked on 1 tick(s)" in d.write_recap(since=0)
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_shutdown_says_the_open_position_is_no_longer_watched(tmp_path, monkeypatch):
+    d, _ = open_one(tmp_path, monkeypatch)
+    txt = d._stop_and_recap()
+    assert "no longer watched" in txt and "GOOD" in txt
+    u = [e for e in d.log.events() if e["event"] == "unprotected" and e.get("agent") == "desk"]
+    assert u and u[0]["mints"] == ["GOODMINT"]
 
 
 def test_live_gate_refuses_without_clean_paper(tmp_path, monkeypatch):

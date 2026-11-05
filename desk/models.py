@@ -105,6 +105,7 @@ class Position:
     opened_at: float
     peak_price: float
     trailing: bool = False
+    sell_attempts: int = 0     # carried across ticks so the slippage escalation does not restart
     tx_entry: str = ""
 
     def stop_floor(self) -> float:

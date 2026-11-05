@@ -49,7 +49,8 @@ class Logger:
                 out.append(r)
         return out
 
-    def recap(self, since: float, balance_now: float, start_balance: float, open_positions: list[dict]) -> str:
+    def recap(self, since: float, balance_now: float, start_balance: float, open_positions: list[dict],
+              stopped: bool = False) -> str:
         ev = self.events(since)
         scanned = {e["mint"] for e in ev if e["event"] == "scouted"}
         kills = Counter(e["rule_name"] for e in ev if e["event"] == "kill")
@@ -60,6 +61,8 @@ class Logger:
         losses = [c for c in closes if c["pnl_usd"] <= 0]
         violations = [e for e in ev if e["event"] == "violation"]
         halts = [e for e in ev if e["event"] == "halt"]
+        blind = [e for e in ev if e["event"] == "unprotected" and e.get("agent") == "risk"]
+        fallbacks = [e for e in ev if e["event"] == "price_fallback"]
         errors = [e for e in ev if e["event"] == "error"]
 
         L = [f"# Morning recap — {datetime.now():%Y-%m-%d %H:%M}",
@@ -82,6 +85,14 @@ class Logger:
         for h in halts:
             L.append(f"- **Entries halted** ({h.get('reason')}): day open ${h.get('day_open_equity'):,.2f} "
                      f"-> ${h.get('equity'):,.2f} ({h.get('drawdown_pct'):+.2f}%)")
+        if fallbacks:
+            L.append(f"- Price fallback used (DexScreener missed, Jupiter answered): {len(fallbacks)} tick(s)")
+        if blind:
+            L.append(f"- **Stop not checked on {len(blind)} tick(s)**: no price from either source")
+        if open_positions and stopped:
+            L.append(f"- **{len(open_positions)} position(s) still open and no longer watched** - "
+                     "the stop only runs while the desk runs: "
+                     + ", ".join(f"{p['symbol']} (stop {p['stop_price']:.8g})" for p in open_positions))
         L.append("")
         if closes or opens:
             L += ["## Trades", "| coin | score | entry | size $ | exit | P/L % | reason |", "|---|---|---|---|---|---|---|"]

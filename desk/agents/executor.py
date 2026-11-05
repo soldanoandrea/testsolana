@@ -77,15 +77,18 @@ class Executor:
         return pos
 
     def exit(self, pos: Position, ref_price: float, reason: str) -> bool:
-        for attempt in range(4):
+        for _ in range(4):
             try:
-                fill = self.broker.sell(pos.mint, pos.qty, ref_price, attempt=attempt)
+                fill = self.broker.sell(pos.mint, pos.qty, ref_price, attempt=pos.sell_attempts)
                 break
             except (DataUnavailable, KeyError, ValueError) as e:
-                self.log.log("error", agent="executor", mint=pos.mint, detail=f"sell attempt {attempt+1} failed: {e}")
+                pos.sell_attempts += 1
+                self.log.log("error", agent="executor", mint=pos.mint,
+                             detail=f"sell attempt {pos.sell_attempts} failed: {e}")
                 time.sleep(2)
         else:
-            return False   # still open; Risk will fire again next tick
+            self.state.save()   # keep the escalation: Risk fires again next tick, wider
+            return False        # still open
         pnl = fill.usd - pos.cost_usd
         self.state.positions.pop(pos.mint, None)
         self.state.save()

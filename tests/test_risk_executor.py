@@ -5,7 +5,8 @@ from conftest import make_pair
 from desk import rules
 from desk.agents.risk import Risk
 from desk.agents.executor import Executor
-from desk.brokers import Fill, PaperBroker
+from desk.brokers import Fill, PaperBroker, sell_slippage_bps
+from desk.http import DataUnavailable
 from desk.config import Config
 from desk.models import Position, Score
 from desk.state import State
@@ -183,6 +184,35 @@ def test_a_valid_stop_survives_a_reload(tmp_path, log):
     back = State.load(st.path, 1000.0, log=log).positions["MINT"]
     assert abs(back.stop_price - raised) < 1e-12
     assert not [r for r in log.records if r["event"] == "violation"]
+
+
+class FailingSellBroker(PaperBroker):
+    def __init__(self, cfg, state):
+        super().__init__(cfg, state)
+        self.attempts = []
+
+    def sell(self, mint, qty, ref_price, attempt=0):
+        self.attempts.append(attempt)
+        raise DataUnavailable("no route")
+
+
+def test_sell_slippage_keeps_widening_across_ticks(tmp_path, log, monkeypatch):
+    monkeypatch.setattr("desk.agents.executor.time.sleep", lambda s: None)
+    st = State(path=tmp_path / "s.json", cash=1000.0, start_balance=1000.0)
+    b = FailingSellBroker(Config(data_dir=tmp_path), st)
+    ex = Executor(b, Risk(log), st, log)
+    p = ex.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+
+    assert ex.exit(p, 1.0, "stop_loss") is False       # first tick: 4 tries
+    assert b.attempts == [0, 1, 2, 3] and p.sell_attempts == 4
+    assert ex.exit(p, 1.0, "stop_loss") is False       # next tick carries on, it does not restart
+    assert b.attempts == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert "GOODMINT" not in st.positions and p.mint in st.positions   # still open
+
+
+def test_sell_slippage_doubles_then_caps():
+    assert [sell_slippage_bps(300, a) for a in range(6)] == [300, 600, 1200, 2400, 2400, 2400]
+    assert sell_slippage_bps(300, -1) == 300
 
 
 def test_concurrent_risk_stays_inside_the_daily_limit():

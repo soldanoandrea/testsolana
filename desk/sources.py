@@ -102,6 +102,28 @@ class RugCheck:
         return bool(self.report(mint, max_age_s=3600).get("rugged"))
 
 
+class Jupiter:
+    """Second price source for the stop monitor: the same quote route live trades through."""
+
+    def __init__(self, http: Http, base: str):
+        self.http = http
+        self.base = base
+
+    def prices(self, mints: Iterable[str]) -> dict[str, dict]:
+        mints = [m for m in dict.fromkeys(mints) if m]
+        out: dict[str, dict] = {}
+        for i in range(0, len(mints), 50):
+            d = self.http.get(f"{self.base}/price/v3", params={"ids": ",".join(mints[i:i + 50])})
+            for m, v in (d or {}).items():
+                try:
+                    px = float((v or {}).get("usdPrice") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if px > 0:
+                    out[m] = {"price": px, "source": "jupiter"}
+        return out
+
+
 class SolanaRPC:
     def __init__(self, http: Http, url: str):
         self.http = http
@@ -132,8 +154,9 @@ class SolanaRPC:
 
 
 class Sources:
-    def __init__(self, http: Http, rpc_url: str):
+    def __init__(self, http: Http, rpc_url: str, jupiter_base: str = "https://lite-api.jup.ag"):
         self.dex = DexScreener(http)
         self.gt = GeckoTerminal(http)
         self.rug = RugCheck(http)
+        self.jup = Jupiter(http, jupiter_base)
         self.rpc = SolanaRPC(http, rpc_url)

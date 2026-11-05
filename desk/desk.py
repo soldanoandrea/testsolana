@@ -54,7 +54,7 @@ class Desk:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.http = Http()
-        self.src = Sources(self.http, cfg.solana_rpc_url)
+        self.src = Sources(self.http, cfg.solana_rpc_url, cfg.jupiter_base)
         self.log = Logger(cfg.path("events.jsonl"))
         self.state = State.load(cfg.path("state.json"), cfg.paper_start_balance_usd, log=self.log)
         if cfg.mode == "live":
@@ -148,20 +148,45 @@ class Desk:
                          open_positions=len(self.state.positions))
 
     # ---------------------------------------------------------------- risk
+    def _quotes(self, mints: list[str]) -> dict[str, dict]:
+        """Prices for the stop monitor: DexScreener first, Jupiter for whatever it did not answer.
+
+        A stop that is not checked is not a stop, so one source being down must not silence the
+        monitor for every position. Whatever neither source prices is logged as `unprotected`:
+        the desk never guesses a price, and never sells blind to escape the uncertainty.
+        """
+        quotes: dict[str, dict] = {}
+        try:
+            quotes = {m: q for m, q in self.src.dex.prices(mints).items()
+                      if (q or {}).get("price", 0) > 0}
+        except DataUnavailable as e:
+            self.log.log("error", agent="risk", detail=f"dexscreener down: {e}")
+        missing = [m for m in mints if m not in quotes]
+        if missing:
+            try:
+                fallback = self.src.jup.prices(missing)
+            except DataUnavailable as e:
+                self.log.log("error", agent="risk", detail=f"jupiter fallback down: {e}")
+            else:
+                quotes.update(fallback)
+                if fallback:
+                    self.log.log("price_fallback", agent="risk", source="jupiter",
+                                 mints=sorted(fallback))
+        blind = [m for m in mints if m not in quotes]
+        if blind:
+            self.log.log("unprotected", agent="risk", mints=sorted(blind),
+                         detail="no price from any source: stop not checked this tick")
+        return quotes
+
     def risk_tick(self) -> None:
         with self.lock:
             positions = list(self.state.positions.values())
         if not positions:
             return
-        try:
-            quotes = self.src.dex.prices([p.mint for p in positions])
-        except DataUnavailable as e:
-            self.log.log("error", agent="risk", detail=f"price feed down: {e}")
-            return
+        quotes = self._quotes([p.mint for p in positions])
         for pos in positions:
             q = quotes.get(pos.mint)
-            if not q or q["price"] <= 0:
-                self.log.log("error", agent="risk", mint=pos.mint, detail="no price")
+            if not q:
                 continue
             price = q["price"]
             self.last_prices[pos.mint] = price
@@ -186,10 +211,10 @@ class Desk:
             marked = sum(p.qty * self.last_prices.get(p.mint, p.entry_price) for p in self.state.positions.values())
         return cash + marked
 
-    def write_recap(self, since: float | None = None) -> str:
+    def write_recap(self, since: float | None = None, stopped: bool = False) -> str:
         since = since if since is not None else self.state.session_start
         opens = [p.to_dict() for p in self.state.positions.values()]
-        txt = self.log.recap(since, self.equity(), self.state.start_balance, opens)
+        txt = self.log.recap(since, self.equity(), self.state.start_balance, opens, stopped=stopped)
         out = self.cfg.path(f"recap-{datetime.now():%Y-%m-%d}.md")
         out.write_text(txt + "\n")
         self.log.log("recap", file=str(out))
@@ -228,5 +253,12 @@ class Desk:
         finally:
             self.stop_evt.set()
             rt.join(timeout=30)
-            self.log.log("stop", open_positions=len(self.state.positions))
-            print(self.write_recap())
+            print(self._stop_and_recap())
+
+    def _stop_and_recap(self) -> str:
+        """The stop only runs while the desk runs, so say so plainly on the way out."""
+        if self.state.positions:
+            self.log.log("unprotected", agent="desk", mints=sorted(self.state.positions),
+                         detail="desk stopped: no stop is running for these until it restarts")
+        self.log.log("stop", open_positions=len(self.state.positions))
+        return self.write_recap(stopped=True)

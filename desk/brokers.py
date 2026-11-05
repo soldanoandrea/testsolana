@@ -9,6 +9,11 @@ from .http import DataUnavailable
 from .sources import SOL_MINT
 
 
+def sell_slippage_bps(base_bps: int, attempt: int) -> int:
+    """Each failed exit doubles the allowance so exits get out, capped at 8x the base."""
+    return base_bps * 2 ** min(max(attempt, 0), 3)
+
+
 @dataclass
 class Fill:
     price: float      # effective USD per token
@@ -115,7 +120,7 @@ class LiveBroker:
         dec = self._decimals(mint)
         held = self.rpc.token_balance(self.owner, mint)
         amount = int(min(qty, held) * 10 ** dec)
-        q = self._quote(mint, SOL_MINT, amount, self.cfg.live_slippage_bps * 2 ** attempt)
+        q = self._quote(mint, SOL_MINT, amount, sell_slippage_bps(self.cfg.live_slippage_bps, attempt))
         sol_before = self.rpc.sol_balance(self.owner)
         sig = self._swap(q)
         time.sleep(2)
