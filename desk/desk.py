@@ -56,7 +56,7 @@ class Desk:
         self.http = Http()
         self.src = Sources(self.http, cfg.solana_rpc_url)
         self.log = Logger(cfg.path("events.jsonl"))
-        self.state = State.load(cfg.path("state.json"), cfg.paper_start_balance_usd)
+        self.state = State.load(cfg.path("state.json"), cfg.paper_start_balance_usd, log=self.log)
         if cfg.mode == "live":
             check_live_gate(cfg)
             self.broker = LiveBroker(cfg, self.http, self.src.rpc, os.environ["SOLANA_PRIVATE_KEY"])
@@ -125,6 +125,8 @@ class Desk:
         is the opposite of protecting the balance. The halt lifts at the next local day.
         """
         day = datetime.now().strftime("%Y-%m-%d")
+        if self.state.day_key != day and any(m not in self.last_prices for m in self.state.positions):
+            return      # no mark yet for an open position: basing the day on entry prices would be a guess
         eq = self.equity()
         if self.state.day_key != day:
             with self.lock:

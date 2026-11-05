@@ -19,7 +19,7 @@ variables can't change them, so paper and live run on exactly the same rules.
 | **Filter** | 8 kill rules (below). One hit kills the coin for good. **Missing data also kills**: if a rule can't be verified, the coin fails it. | RugCheck report, cross-checked against Solana RPC `getAccountInfo` for the authorities |
 | **Analyst** | Watches holder count for `DESK_HOLDER_WINDOW_S` (300 s), sends the coin back through Filter on fresh data, then scores it 0–100. 70+ goes to Executor, under 70 dies. | DexScreener, GeckoTerminal (unique buyers/sellers in the last hour), RugCheck holders, RPC (smart wallets) |
 | **Executor** | 5% of the current balance per trade, **at most 6 positions open at once**. One entry per coin, ever. Never averages down. Asks Risk for the stop before it orders. Refuses every entry while the desk is halted. | Paper fills or Jupiter swaps |
-| **Risk** | Stop at −30% from the expected fill, set before the order. Stops can only move up: lowering one is blocked and logged as a violation. At +60% from entry it switches to a trailing stop 20% under the peak, which locks in at least +25%. Exits only when the stop or the trail is hit. Checks every 10 s. | DexScreener prices |
+| **Risk** | Stop committed before the order goes in, then placed at exactly −30% from the **real fill** (paper and live land on the same number; the slippage setting cannot reach it). Stops can only move up: lowering one is blocked and logged as a violation, including a stop read back from `state.json`. At +60% from entry it switches to a trailing stop 20% under the peak, which locks in at least +25%. Exits only when the stop or the trail is hit. Checks every 10 s. | DexScreener prices |
 | **Logger** | Logs every kill with the exact rule, and every trade with entry, size, score, exit and reason. Writes the morning recap at 08:00 local and on shutdown. | — |
 
 ### Filter rules (`R1`…`R8`)
@@ -95,6 +95,9 @@ wider slippage each time (6%, then 12%, then 24%) so exits get out. Use a privat
 ### Honest limitations
 - **A −30% stop is not guaranteed on Solana.** There are no native stop orders, so the desk watches
   the price every 10 s and sells with a market swap. A rug or a sharp candle can gap far below the stop.
+- **The stop lives in this process, not on-chain.** If the price feed is down, `risk_tick` logs the
+  outage and checks nothing until it returns; if the desk is stopped, open positions keep no stop at
+  all. Both are visible in the log, neither is protection.
 - **The numbers above are a prior, not a fit.** Nothing has been backtested: the paper log is what
   will say whether 70+ scores actually reach +60% often enough to pay for the stop-outs.
 - The bundle and dev-rug checks are only as good as RugCheck's data. When RugCheck is down,

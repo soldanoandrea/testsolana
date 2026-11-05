@@ -119,6 +119,27 @@ def test_loss_limit_leaves_open_positions_alone(tmp_path, monkeypatch):
     assert not [e for e in d.log.events() if e["event"] == "trade_close"]
 
 
+def test_day_baseline_waits_for_a_real_mark(tmp_path, monkeypatch):
+    """The day's opening equity must not be based on entry prices for an unmarked position."""
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    FAKE_MARKET.price = 1.0
+    d.pipeline_tick()
+    d.analyst.watching["GOODMINT"].t0 -= 600
+    d.pipeline_tick()
+    assert "GOODMINT" in d.state.positions
+
+    d.state.day_key = "1970-01-01"          # a new day arrives...
+    d.last_prices.clear()                   # ...before the risk loop has marked anything
+    d._daily_guard()
+    assert d.state.day_key == "1970-01-01"  # deferred, not based on a guess
+
+    d.risk_tick()                           # first real mark
+    d._daily_guard()
+    assert d.state.day_key != "1970-01-01" and d.state.day_start_equity > 0
+
+
 def test_live_gate_refuses_without_clean_paper(tmp_path, monkeypatch):
     monkeypatch.delenv("DESK_CONFIRM_LIVE", raising=False)
     cfg = dataclasses.replace(Config(), data_dir=tmp_path, mode="live")

@@ -1,8 +1,11 @@
+import json
+
+import pytest
 from conftest import make_pair
 from desk import rules
 from desk.agents.risk import Risk
 from desk.agents.executor import Executor
-from desk.brokers import PaperBroker
+from desk.brokers import Fill, PaperBroker
 from desk.config import Config
 from desk.models import Position, Score
 from desk.state import State
@@ -105,6 +108,81 @@ def test_size_never_breaches_the_cap(tmp_path, log):
     cap = rules.EXECUTOR_MAX_POSITION_PCT / 100
     for balance in (85_737.5, 1000.0, 1.0, 12_345.67, 99_999.99):
         assert ex.size_for(balance) <= balance * cap
+
+
+class WorstCaseQuoteBroker:
+    """Like LiveBroker: expected_buy_price quotes the worst case allowed by slippage,
+    while the real fill comes back at the reference price."""
+
+    def __init__(self, slip_pct):
+        self.slip = slip_pct / 100
+
+    def balance_usd(self):
+        return 1000.0
+
+    def expected_buy_price(self, mint, usd, ref):
+        return ref * (1 + self.slip)
+
+    def buy(self, mint, usd, ref):
+        return Fill(price=ref, qty=usd / ref, usd=usd, tx="sig")
+
+
+def live_exec(tmp_path, log, slip):
+    st = State(path=tmp_path / f"s{slip}.json", cash=1000.0, start_balance=1000.0)
+    return Executor(WorstCaseQuoteBroker(slip), Risk(log), st, log), st
+
+
+@pytest.mark.parametrize("slip", [0.0, 3.0, 10.0, 30.0])
+def test_stop_is_exactly_the_rule_off_the_real_fill(tmp_path, log, slip):
+    """Regression: the stop used to be quoted off the worst case, leaving live tighter than paper."""
+    ex, _ = live_exec(tmp_path, log, slip)
+    p = ex.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+    eff = (p.stop_price / p.entry_price - 1) * 100
+    assert abs(eff - rules.RISK_STOP_PCT) < 1e-9, eff
+
+
+def test_slippage_setting_cannot_move_the_stop(tmp_path, log):
+    """DESK_LIVE_SLIPPAGE_BPS is operational config; it must not reach a trading rule."""
+    a, _ = live_exec(tmp_path, log, 3.0)
+    b, _ = live_exec(tmp_path, log, 12.0)
+    pa = a.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+    pb = b.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+    assert pa.stop_price == pb.stop_price
+
+
+def test_stop_committed_before_the_order_then_rebased(tmp_path, log):
+    ex, _ = live_exec(tmp_path, log, 10.0)
+    ex.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+    events = [r["event"] for r in log.records]
+    assert events.index("stop_set") < events.index("trade_open")   # committed before the order
+    assert "stop_rebased" in events                                # and corrected onto the real fill
+    reb = [r for r in log.records if r["event"] == "stop_rebased"][0]
+    assert reb["committed"] > reb["stop"]        # the quoted worst case was the tighter one
+
+
+def test_tampered_stop_is_raised_back_and_logged(tmp_path, log):
+    ex, st = make_exec(tmp_path, log)
+    ex.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+    st.save()
+    d = json.loads(st.path.read_text())
+    d["positions"]["MINT"]["stop_price"] = 0.0001      # someone lowered the stop on disk
+    st.path.write_text(json.dumps(d))
+
+    pos = State.load(st.path, 1000.0, log=log).positions["MINT"]
+    assert abs(pos.stop_price - pos.stop_floor()) < 1e-12
+    v = [r for r in log.records if r["event"] == "violation" and r["what"] == "stop_below_floor_on_load"]
+    assert v and v[0]["stored"] == 0.0001
+
+
+def test_a_valid_stop_survives_a_reload(tmp_path, log):
+    ex, st = make_exec(tmp_path, log)
+    p = ex.enter(Score(make_pair(price_usd=1.0), 80, {}, {}))
+    raised = p.entry_price * 0.95                      # the trail had already moved it up
+    assert p.raise_stop(raised)
+    st.save()
+    back = State.load(st.path, 1000.0, log=log).positions["MINT"]
+    assert abs(back.stop_price - raised) < 1e-12
+    assert not [r for r in log.records if r["event"] == "violation"]
 
 
 def test_concurrent_risk_stays_inside_the_daily_limit():

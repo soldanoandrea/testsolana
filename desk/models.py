@@ -4,6 +4,8 @@ import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
+from . import rules
+
 
 @dataclass
 class Pair:
@@ -104,6 +106,10 @@ class Position:
     peak_price: float
     trailing: bool = False
     tx_entry: str = ""
+
+    def stop_floor(self) -> float:
+        """The lowest this position's stop may ever sit: the hard stop off the real entry."""
+        return self.entry_price * (1 + rules.RISK_STOP_PCT / 100)
 
     def raise_stop(self, new_stop: float) -> bool:
         """Stops only move up. Any attempt to lower one is refused."""

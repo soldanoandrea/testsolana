@@ -23,16 +23,37 @@ class State:
     day_start_equity: float = 0.0                     # equity at that day's first tick
 
     @classmethod
-    def load(cls, path: Path, start_balance: float) -> "State":
+    def load(cls, path: Path, start_balance: float, log=None) -> "State":
         if not path.exists():
             s = cls(path=path, cash=start_balance, start_balance=start_balance)
             s.save()
             return s
         d = json.loads(path.read_text())
         return cls(path=path, cash=d["cash"], start_balance=d["start_balance"], session_start=d["session_start"],
-                   positions={m: Position(**p) for m, p in d["positions"].items()},
+                   positions=cls._load_positions(d["positions"], log),
                    traded=set(d["traded"]), dead=set(d["dead"]), last_recap_day=d.get("last_recap_day", ""),
                    day_key=d.get("day_key", ""), day_start_equity=d.get("day_start_equity", 0.0))
+
+    @staticmethod
+    def _load_positions(raw: dict, log=None) -> dict[str, Position]:
+        """A stop read back from disk is not trusted: the file could have been edited or half-written.
+
+        Re-check the one invariant that bounds the loss — the stop is never below the hard stop off
+        the real entry — and raise it back if it is. Lowering a stop is a violation wherever it comes
+        from, so it is logged as one and the live gate will refuse to start on it.
+        """
+        out: dict[str, Position] = {}
+        for mint, p in raw.items():
+            pos = Position(**p)
+            floor = pos.stop_floor()
+            if pos.entry_price > 0 and pos.stop_price < floor - 1e-12:
+                stored = pos.stop_price
+                pos.raise_stop(floor)
+                if log is not None:
+                    log.violation("stop_below_floor_on_load", mint=mint, stored=stored, floor=floor,
+                                  entry=pos.entry_price, detail="stop raised back to the hard floor")
+            out[mint] = pos
+        return out
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
