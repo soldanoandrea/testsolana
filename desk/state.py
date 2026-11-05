@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .models import Position
 
@@ -19,8 +21,13 @@ class State:
     traded: set[str] = field(default_factory=set)     # one entry per coin, ever
     dead: set[str] = field(default_factory=set)       # Filter kills + Analyst <70
     last_recap_day: str = ""
+    benched: dict[str, float] = field(default_factory=dict)   # mint -> earliest retry (market rules)
     day_key: str = ""                                 # local day the loss limit is measured against
     day_start_equity: float = 0.0                     # equity at that day's first tick
+    # Entries run on the pipeline thread and exits on the risk thread, so every mutation of
+    # `positions` and every write of the file goes through this lock. Without it a save could
+    # iterate the dict while the other thread is removing a position from it.
+    _lock: Any = field(default_factory=threading.RLock, repr=False, compare=False)
 
     @classmethod
     def load(cls, path: Path, start_balance: float, log=None) -> "State":
@@ -31,7 +38,8 @@ class State:
         d = json.loads(path.read_text())
         return cls(path=path, cash=d["cash"], start_balance=d["start_balance"], session_start=d["session_start"],
                    positions=cls._load_positions(d["positions"], log),
-                   traded=set(d["traded"]), dead=set(d["dead"]), last_recap_day=d.get("last_recap_day", ""),
+                   traded=set(d["traded"]), dead=set(d["dead"]), benched=dict(d.get("benched") or {}),
+                   last_recap_day=d.get("last_recap_day", ""),
                    day_key=d.get("day_key", ""), day_start_equity=d.get("day_start_equity", 0.0))
 
     @staticmethod
@@ -56,11 +64,28 @@ class State:
         return out
 
     def save(self) -> None:
+        with self._lock:
+            self._save_locked()
+
+    def open_position(self, pos: Position) -> None:
+        """The one place a position appears. One entry per coin, ever: `traded` is never cleared."""
+        with self._lock:
+            self.traded.add(pos.mint)
+            self.positions[pos.mint] = pos
+            self._save_locked()
+
+    def close_position(self, mint: str) -> None:
+        with self._lock:
+            self.positions.pop(mint, None)
+            self._save_locked()
+
+    def _save_locked(self) -> None:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps({
             "cash": self.cash, "start_balance": self.start_balance, "session_start": self.session_start,
             "positions": {m: p.to_dict() for m, p in self.positions.items()},
-            "traded": sorted(self.traded), "dead": sorted(self.dead), "last_recap_day": self.last_recap_day,
+            "traded": sorted(self.traded), "dead": sorted(self.dead), "benched": self.benched,
+            "last_recap_day": self.last_recap_day,
             "day_key": self.day_key, "day_start_equity": self.day_start_equity,
         }, indent=1))
         tmp.replace(self.path)

@@ -1,5 +1,11 @@
-"""FILTER: 8 kill rules. One hit = dead. Missing data = dead (we cannot prove it is safe)."""
+"""FILTER: 8 kill rules. One hit = dead. Missing data = dead (we cannot prove it is safe).
+
+Safety rules (1, 2, 5, 6, 7) kill for good. Market rules (3, 4, 8) bench the coin instead: the
+verdict is just as final for this look, but the coin is allowed back after rules.FILTER_BENCH_S.
+"""
 from __future__ import annotations
+
+import time
 
 from .. import rules
 from ..http import DataUnavailable
@@ -122,13 +128,20 @@ class Filter:
         self.src = sources
         self.log = logger
         self.dead: set[str] = set()
+        self.benched: dict[str, float] = {}     # mint -> earliest retry, market conditions only
 
     def _kill(self, pair: Pair, hits: list[tuple[int, str]], safety=None) -> Verdict:
         rule, detail = min(hits)
         extra = "; also " + "; ".join(f"R{n}: {d}" for n, d in sorted(hits)[1:]) if len(hits) > 1 else ""
         v = Verdict(pair, False, rule, R.RULE_NAMES[rule], detail + extra, safety)
-        self.dead.add(pair.mint)
-        self.log.kill(v)
+        # One permanent rule among the hits is enough to kill it for good.
+        permanent = [n for n, _ in hits if n not in R.FILTER_TRANSIENT_RULES]
+        if permanent:
+            self.dead.add(pair.mint)
+            self.benched.pop(pair.mint, None)
+        else:
+            self.benched[pair.mint] = time.time() + R.FILTER_BENCH_S
+        self.log.kill(v, permanent=bool(permanent))
         return v
 
     def check(self, pair: Pair) -> Verdict:

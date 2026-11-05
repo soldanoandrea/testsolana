@@ -1,5 +1,8 @@
+import time
+
 import pytest
 from conftest import make_pair, make_report
+from desk import rules
 from desk.agents.filter import Filter, build_safety, market_rules, safety_rules
 from desk.http import DataUnavailable
 
@@ -93,10 +96,58 @@ def test_safety_source_down_kills(log):
     assert not f.check(make_pair()).alive
 
 
-def test_dead_stays_dead(log):
+def top10_over_25():
+    """A report that trips R5, a safety rule."""
+    return make_report(topHolders=[{"owner": f"W{i}", "address": f"A{i}", "pct": 3.0} for i in range(15)])
+
+
+def test_a_safety_kill_stays_dead(log):
+    f = Filter(Src(top10_over_25()), log)
+    v = f.check(make_pair())
+    assert v.rule == 5 and "MINT" in f.dead and "MINT" not in f.benched
+    f.src = Src(make_report())                      # the token is fine now: does not matter
+    assert not f.check(make_pair()).alive
+    assert f.check(make_pair()).rule_name == "ALREADY_DEAD"
+
+
+def test_a_market_kill_benches_instead(log):
+    """R3/R4/R8 describe the hour, not the token: the coin comes back after the bench."""
     f = Filter(Src(make_report()), log)
-    assert not f.check(make_pair(liquidity_usd=1)).alive
-    assert not f.check(make_pair()).alive   # same mint, now clean data: still dead
+    v = f.check(make_pair(liquidity_usd=1))
+    assert v.rule == 3
+    assert "MINT" not in f.dead                     # not killed for good
+    assert f.benched["MINT"] > time.time() + rules.FILTER_BENCH_S - 5
+    assert [r for r in log.records if r["event"] == "kill"][-1]["permanent"] is False
+    # deeper liquidity later, and the same coin passes
+    assert f.check(make_pair()).alive
+
+
+def test_a_market_hit_benches_before_safety_is_even_checked(log):
+    """Market rules run first to save API calls, so a bench can precede knowing the token is bad.
+
+    That is safe: a benched coin is not a traded coin, and the next look (once the hour has
+    changed) reaches the safety rules and kills it for good.
+    """
+    f = Filter(Src(top10_over_25()), log)
+    assert f.check(make_pair(price_change_h1=90.0)).rule == 8     # R8 first, R5 not consulted
+    assert "MINT" in f.benched and "MINT" not in f.dead
+    f.benched.clear()
+    assert f.check(make_pair()).rule == 5                          # calmer hour -> R5 lands
+    assert "MINT" in f.dead and "MINT" not in f.benched
+
+
+def test_one_permanent_hit_in_a_mixed_verdict_wins(log):
+    """_kill decides on the whole hit list, so any safety rule in it kills for good."""
+    f = Filter(Src(make_report()), log)
+    f._kill(make_pair(), [(3, "thin"), (5, "concentrated")])
+    assert "MINT" in f.dead and "MINT" not in f.benched
+    assert [r for r in log.records if r["event"] == "kill"][-1]["permanent"] is True
+
+
+def test_market_only_hits_are_benched_together(log):
+    f = Filter(Src(make_report()), log)
+    assert f.check(make_pair(liquidity_usd=1, volume_h1=1, price_change_h1=99.0)).rule == 3
+    assert "MINT" in f.benched and "MINT" not in f.dead
 
 
 def test_lowest_rule_reported_and_all_listed(log):

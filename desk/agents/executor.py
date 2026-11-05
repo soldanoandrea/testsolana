@@ -68,9 +68,7 @@ class Executor:
         if abs(pos.stop_price - committed) > 1e-12:
             self.log.log("stop_rebased", mint=p.mint, symbol=p.symbol, committed=committed,
                          expected_entry=expected, actual_entry=fill.price, stop=pos.stop_price)
-        self.state.traded.add(p.mint)
-        self.state.positions[p.mint] = pos
-        self.state.save()
+        self.state.open_position(pos)
         assert pos.stop_price >= pos.stop_floor() - 1e-12
         self.log.log("trade_open", mint=p.mint, symbol=p.symbol, score=s.total, entry_price=fill.price,
                      size_usd=fill.usd, qty=fill.qty, stop=pos.stop_price, balance_before=balance, tx=fill.tx)
@@ -90,8 +88,7 @@ class Executor:
             self.state.save()   # keep the escalation: Risk fires again next tick, wider
             return False        # still open
         pnl = fill.usd - pos.cost_usd
-        self.state.positions.pop(pos.mint, None)
-        self.state.save()
+        self.state.close_position(pos.mint)
         self.log.log("trade_close", mint=pos.mint, symbol=pos.symbol, score=pos.score, entry_price=pos.entry_price,
                      exit_price=fill.price, size_usd=pos.cost_usd, proceeds_usd=fill.usd, pnl_usd=round(pnl, 4),
                      pnl_pct=round(pnl / pos.cost_usd * 100, 2), reason=reason,

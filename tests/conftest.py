@@ -31,7 +31,7 @@ def make_report(**kw):
 class Log:
     def __init__(self): self.records = []
     def log(self, event, **d): self.records.append({"event": event, **d}); return d
-    def kill(self, v): self.log("kill", rule=v.rule, rule_name=v.rule_name, detail=v.detail)
+    def kill(self, v, **extra): self.log("kill", rule=v.rule, rule_name=v.rule_name, detail=v.detail, **extra)
     def violation(self, what, **d): self.log("violation", what=what, **d)
 
 

@@ -1,5 +1,6 @@
 """End-to-end: scout -> filter -> analyst -> executor -> risk -> exit, with fake market data."""
 import dataclasses
+import threading
 import time
 
 import desk.desk as deskmod
@@ -12,7 +13,7 @@ from desk.http import DataUnavailable
 def ds_pair(mint, price, created_s_ago=3 * 3600, **kw):
     p = {"pairAddress": "PAIR", "baseToken": {"address": mint, "symbol": "GOOD"}, "dexId": "pumpswap",
          "pairCreatedAt": int((time.time() - created_s_ago) * 1000), "priceUsd": str(price),
-         "marketCap": 1_000_000, "liquidity": {"usd": 220_000}, "volume": {"h1": 300_000},
+         "marketCap": 1_000_000, "liquidity": {"usd": FAKE_MARKET.liquidity}, "volume": {"h1": 300_000},
          "priceChange": {"m5": 2, "h1": 30}, "txns": {"h1": {"buys": 900, "sells": 300}}}
     p.update(kw)
     return p
@@ -20,13 +21,12 @@ def ds_pair(mint, price, created_s_ago=3 * 3600, **kw):
 
 class Market:
     def __init__(self):
-        self.price = 1.0
-        self.holders = 1000
-        self.dex_down = False
-        self.jup_down = False
+        self.reset()
 
     def reset(self):
-        self.price, self.holders, self.dex_down, self.jup_down = 1.0, 1000, False, False
+        self.price, self.holders = 1.0, 1000
+        self.liquidity = 220_000
+        self.dex_down = self.jup_down = False
 
 
 class FakeSources:
@@ -205,6 +205,115 @@ def test_shutdown_says_the_open_position_is_no_longer_watched(tmp_path, monkeypa
     assert "no longer watched" in txt and "GOOD" in txt
     u = [e for e in d.log.events() if e["event"] == "unprotected" and e.get("agent") == "desk"]
     assert u and u[0]["mints"] == ["GOODMINT"]
+
+
+def scouted(d):
+    return [e for e in d.log.events() if e["event"] == "scouted"]
+
+
+def test_a_market_rule_benches_the_coin_and_it_comes_back(tmp_path, monkeypatch):
+    """R3/R4/R8 describe the hour. The coin must get another look, not a permanent grave."""
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    FAKE_MARKET.liquidity = 10_000                  # under R3
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    try:
+        d.pipeline_tick()
+        assert "GOODMINT" not in d.state.dead       # benched, not killed
+        assert "GOODMINT" in d.state.benched
+        assert len(scouted(d)) == 1
+
+        d.pipeline_tick()                           # bench still running: not handed again
+        assert len(scouted(d)) == 1
+
+        FAKE_MARKET.liquidity = 220_000             # liquidity arrives
+        d.state.benched["GOODMINT"] = time.time() - 1
+        d.pipeline_tick()
+        assert len(scouted(d)) == 2                 # looked at again
+        assert "GOODMINT" in d.analyst.watching     # and through the Filter this time
+        assert "GOODMINT" not in d.state.benched
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_a_safety_kill_is_never_retried(tmp_path, monkeypatch):
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    d.filter.src = type("S", (), {
+        "rug": type("R", (), {"report": staticmethod(lambda m: make_report(
+            topHolders=[{"owner": f"W{i}", "address": f"A{i}", "pct": 3.0} for i in range(15)])),
+            "was_rugged": staticmethod(lambda m: False)})(),
+        "rpc": d.src.rpc})()
+    d.pipeline_tick()
+    assert "GOODMINT" in d.state.dead and "GOODMINT" not in d.state.benched
+    d.pipeline_tick()
+    assert len(scouted(d)) == 1                     # never handed over again
+
+
+def lock_free(lock, timeout=0.3) -> bool:
+    """Can a DIFFERENT thread take this lock right now? (an RLock lies to its own thread)"""
+    box = {}
+
+    def probe():
+        if lock.acquire(timeout=timeout):
+            lock.release()
+            box["ok"] = True
+        else:
+            box["ok"] = False
+
+    t = threading.Thread(target=probe)
+    t.start()
+    t.join()
+    return box["ok"]
+
+
+def test_a_sell_does_not_hold_the_desk_lock(tmp_path, monkeypatch):
+    """A live swap can take minutes; holding the lock would freeze every other stop."""
+    d, pos = open_one(tmp_path, monkeypatch)
+    seen, real = {}, d.broker.sell
+
+    def probing_sell(mint, qty, ref_price, attempt=0):
+        seen["free"] = lock_free(d.lock)
+        return real(mint, qty, ref_price, attempt=attempt)
+
+    d.broker.sell = probing_sell
+    FAKE_MARKET.price = pos.stop_price * 0.99
+    d.risk_tick()
+    assert not d.state.positions                    # it really did sell
+    assert seen["free"] is True, "the stop monitor was blocked during the swap"
+    FAKE_MARKET.reset()
+
+
+def test_a_buy_does_not_hold_the_desk_lock(tmp_path, monkeypatch):
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    seen, real = {}, d.broker.buy
+
+    def probing_buy(mint, usd, ref):
+        seen["free"] = lock_free(d.lock)
+        return real(mint, usd, ref)
+
+    d.broker.buy = probing_buy
+    d.pipeline_tick()
+    d.analyst.watching["GOODMINT"].t0 -= 600
+    d.pipeline_tick()
+    assert "GOODMINT" in d.state.positions
+    assert seen["free"] is True, "the stop monitor was blocked during the buy"
+
+
+def test_a_sell_in_flight_is_not_started_twice(tmp_path, monkeypatch):
+    d, pos = open_one(tmp_path, monkeypatch)
+    d.exiting.add("GOODMINT")                       # as if a swap were already confirming
+    FAKE_MARKET.price = pos.stop_price * 0.99
+    d.risk_tick()
+    assert "GOODMINT" in d.state.positions          # left to the sell already running
+    assert not [e for e in d.log.events() if e["event"] == "trade_close"]
+    FAKE_MARKET.reset()
 
 
 def test_live_gate_refuses_without_clean_paper(tmp_path, monkeypatch):

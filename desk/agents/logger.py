@@ -29,8 +29,9 @@ class Logger:
         return rec
 
     # convenience wrappers so every agent logs the same shape
-    def kill(self, verdict) -> None:
-        self.log("kill", rule=verdict.rule, rule_name=verdict.rule_name, detail=verdict.detail, **verdict.pair.brief())
+    def kill(self, verdict, **extra) -> None:
+        self.log("kill", rule=verdict.rule, rule_name=verdict.rule_name, detail=verdict.detail,
+                 **extra, **verdict.pair.brief())
 
     def violation(self, what: str, **data) -> None:
         """An invariant was about to be broken and was blocked. Live mode refuses to start if any exist."""

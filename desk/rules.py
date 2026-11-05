@@ -34,6 +34,15 @@ RULE_NAMES = MappingProxyType({
     8: "R8_UP_80PCT_LAST_HOUR",
 })
 
+# Rules 1, 2, 5, 6 and 7 are facts about the token: a coin that fails one is dead for good.
+# Rules 3, 4 and 8 are market conditions that change by the hour — thin liquidity at midnight can
+# be deep by 3 a.m. Those bench the coin for FILTER_BENCH_S and it gets another look afterwards.
+# They are also the cheap rules (no extra API calls), so re-checking a benched coin costs nothing
+# until it actually passes them.
+FILTER_TRANSIENT_RULES = frozenset({3, 4, 8})
+FILTER_BENCH_S = 1800
+assert FILTER_TRANSIENT_RULES < frozenset(RULE_NAMES)
+
 # ---- ANALYST -------------------------------------------------------------
 ANALYST_MIN_SCORE = 70
 ANALYST_WEIGHTS = MappingProxyType({

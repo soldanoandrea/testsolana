@@ -66,16 +66,19 @@ class Desk:
         else:
             self.broker = PaperBroker(cfg, self.state)
         self.lock = threading.RLock()
+        self.exiting: set[str] = set()     # mints with a sell in flight
         self.stop_evt = threading.Event()
         self.last_prices: dict[str, float] = {}
 
         self.scout = Scout(self.src, self.log)
         self.filter = Filter(self.src, self.log)
         self.filter.dead = self.state.dead            # shared: dead is dead across restarts
+        self.filter.benched = self.state.benched      # shared: a bench survives a restart too
+        self.scout.benched = self.state.benched
         self.analyst = Analyst(self.src, self.log, cfg.smart_wallets(), cfg.holder_window_s)
         self.risk = Risk(self.log)
         self.executor = Executor(self.broker, self.risk, self.state, self.log)
-        self.scout.handed_off |= self.state.dead | self.state.traded
+        self.scout.seen |= self.state.dead | self.state.traded
 
     # ---------------------------------------------------------------- pipeline
     def pipeline_tick(self) -> None:
@@ -102,8 +105,9 @@ class Desk:
             if s.total < rules.ANALYST_MIN_SCORE:
                 self.state.dead.add(fresh.mint)
                 continue
-            with self.lock:
-                self.executor.enter(s)
+            # Deliberately not under the desk lock: a live buy can take minutes to confirm, and
+            # the stop monitor has to keep running meanwhile. State serialises its own writes.
+            self.executor.enter(s)
         self._save()
 
     def _fresh_pair(self, old: Pair) -> Pair | None:
@@ -191,10 +195,22 @@ class Desk:
             price = q["price"]
             self.last_prices[pos.mint] = price
             with self.lock:
+                if pos.mint in self.exiting:
+                    continue                      # a sell is already in flight for this one
                 reason = self.risk.update(pos, price)
                 if reason:
-                    self.executor.exit(pos, price, reason)
+                    self.exiting.add(pos.mint)
                 self._save()
+            if not reason:
+                continue
+            # Same reason as the buy: a swap that waits two minutes for confirmation must not
+            # stop every other position from being checked, which is exactly when it matters.
+            try:
+                self.executor.exit(pos, price, reason)
+            finally:
+                with self.lock:
+                    self.exiting.discard(pos.mint)
+                    self._save()
 
     def _risk_loop(self) -> None:
         while not self.stop_evt.is_set():
@@ -206,9 +222,10 @@ class Desk:
 
     # ---------------------------------------------------------------- recap
     def equity(self) -> float:
+        cash = self.broker.balance_usd()      # live: an RPC and a price call, so not under the lock
         with self.lock:
-            cash = self.broker.balance_usd()
-            marked = sum(p.qty * self.last_prices.get(p.mint, p.entry_price) for p in self.state.positions.values())
+            marked = sum(p.qty * self.last_prices.get(p.mint, p.entry_price)
+                         for p in list(self.state.positions.values()))
         return cash + marked
 
     def write_recap(self, since: float | None = None, stopped: bool = False) -> str:
