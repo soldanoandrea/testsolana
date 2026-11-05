@@ -1,0 +1,3 @@
+# One Solana wallet address per line. Copy to smart_wallets.txt and fill in wallets you trust
+# (consistently profitable traders you've vetted yourself). The Analyst counts how many of these
+# hold the coin. With no list, the "smart wallets" component scores 0 (max possible score = 85).
