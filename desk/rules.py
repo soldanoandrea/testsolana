@@ -55,6 +55,23 @@ ANALYST_WEIGHTS = MappingProxyType({
 })
 assert sum(ANALYST_WEIGHTS.values()) == 100
 
+# A score is mostly a statement about the hour: 85 of the 100 points — momentum, unique buyers,
+# buy/sell ratio, holder growth, liquidity/mcap — are conditions that move. Only smart_wallets is
+# structural (it depends on your own list, and with no list it is a fixed 0). Burying a coin for
+# good on the other 85 contradicts FILTER_TRANSIENT_RULES, which gives R3 another look after half
+# an hour — and R3 is thin liquidity, the same quantity liquidity_to_mcap measures as a ratio.
+#
+# But the Analyst's look is expensive: an observation window of DESK_HOLDER_WINDOW_S plus RugCheck
+# and RPC on the re-check, where rules 3/4/8 cost no extra calls at all. Re-observing every reject
+# would starve the discovery of new coins. So the retry is much stricter than the Filter's bench:
+# only a near miss, only twice, and only after a full hour. With no smart_wallets list the passing
+# band is 70-85, so a near-miss band of 15 points is exactly as wide as the band it is trying for.
+ANALYST_RETRY_WITHIN = 15.0       # points below the threshold that still earn another look
+ANALYST_MAX_RETRIES = 2           # at most this many extra looks per coin, then dead for good
+ANALYST_RETRY_AFTER_S = 3600
+assert ANALYST_RETRY_AFTER_S > FILTER_BENCH_S     # the expensive look waits longer than the cheap one
+assert ANALYST_RETRY_WITHIN < ANALYST_MIN_SCORE
+
 # ---- EXECUTOR ------------------------------------------------------------
 EXECUTOR_MAX_POSITION_PCT = 5.0   # of current balance, per trade
 EXECUTOR_MAX_OPEN_POSITIONS = 6   # hard cap on positions held at the same time

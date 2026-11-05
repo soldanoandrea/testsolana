@@ -21,7 +21,8 @@ class State:
     traded: set[str] = field(default_factory=set)     # one entry per coin, ever
     dead: set[str] = field(default_factory=set)       # Filter kills + Analyst <70
     last_recap_day: str = ""
-    benched: dict[str, float] = field(default_factory=dict)   # mint -> earliest retry (market rules)
+    benched: dict[str, float] = field(default_factory=dict)   # mint -> earliest retry (Filter + Analyst)
+    analyst_retries: dict[str, int] = field(default_factory=dict)   # mint -> extra looks spent
     # An order that has been placed but not yet recorded as a position. Written before the order
     # goes out, cleared once the position is stored, reconciled against the chain on startup.
     pending_entry: dict | None = None
@@ -43,6 +44,7 @@ class State:
                    positions=cls._load_positions(d["positions"], log),
                    traded=set(d["traded"]), dead=set(d["dead"]), benched=dict(d.get("benched") or {}),
                    pending_entry=d.get("pending_entry") or None,
+                   analyst_retries=dict(d.get("analyst_retries") or {}),
                    last_recap_day=d.get("last_recap_day", ""),
                    day_key=d.get("day_key", ""), day_start_equity=d.get("day_start_equity", 0.0))
 
@@ -101,7 +103,7 @@ class State:
             "cash": self.cash, "start_balance": self.start_balance, "session_start": self.session_start,
             "positions": {m: p.to_dict() for m, p in self.positions.items()},
             "traded": sorted(self.traded), "dead": sorted(self.dead), "benched": self.benched,
-            "pending_entry": self.pending_entry,
+            "pending_entry": self.pending_entry, "analyst_retries": self.analyst_retries,
             "last_recap_day": self.last_recap_day,
             "day_key": self.day_key, "day_start_equity": self.day_start_equity,
         }, indent=1))

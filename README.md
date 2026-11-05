@@ -17,7 +17,7 @@ variables can't change them, so paper and live run on exactly the same rules.
 |---|---|---|
 | **Scout** | Pump.fun (`pumpfun`, `pumpswap`) and Raydium pairs, 30 min–72 h old, mcap $300k–$20M. Each coin is passed to Filter once, plus once more each time a market rule benched it. | DexScreener (profiles, boosts, search) and GeckoTerminal (trending, per-DEX pools) for discovery. DexScreener for every metric. |
 | **Filter** | 8 kill rules (below). One hit is final for this look. A safety rule (1, 2, 5, 6, 7) kills the coin **for good**; a market rule (3, 4, 8) **benches** it for 30 min and it gets another look. **Missing data also kills**: if a rule can't be verified, the coin fails it. | RugCheck report, cross-checked against Solana RPC `getAccountInfo` for the authorities |
-| **Analyst** | Watches holder count for `DESK_HOLDER_WINDOW_S` (300 s), sends the coin back through Filter on fresh data, then scores it 0–100. 70+ goes to Executor, under 70 dies. | DexScreener, GeckoTerminal (unique buyers/sellers in the last hour), RugCheck holders, RPC (smart wallets) |
+| **Analyst** | Watches holder count for `DESK_HOLDER_WINDOW_S` (300 s), sends the coin back through Filter on fresh data, then scores it 0–100. 70+ goes to Executor, under 70 dies — unless it is a **near miss**, which earns up to 2 more looks an hour apart (below). | DexScreener, GeckoTerminal (unique buyers/sellers in the last hour), RugCheck holders, RPC (smart wallets) |
 | **Executor** | 5% of the current balance per trade, **at most 6 positions open at once**. One entry per coin, ever. Never averages down. Asks Risk for the stop before it orders. Refuses every entry while the desk is halted. Writes the order to `state.json` **before** placing it, so a crash between a confirmed swap and the record cannot leave an unwatched bag in the wallet. | Paper fills or Jupiter swaps |
 | **Risk** | Stop committed before the order goes in, then placed at exactly −30% from the **real fill** (paper and live land on the same number; the slippage setting cannot reach it). Stops can only move up: lowering one is blocked and logged as a violation, including a stop read back from `state.json`. At +60% from entry it switches to a trailing stop 20% under the peak, which locks in at least +25%. Exits only when the stop or the trail is hit. Checks every 10 s, and falls back to Jupiter for any coin DexScreener does not price. | DexScreener prices, Jupiter as fallback |
 | **Logger** | Logs every kill with the exact rule, and every trade with entry, size, score, exit and reason. Writes the morning recap at 08:00 local and on shutdown. | — |
@@ -68,6 +68,30 @@ Two caps sit on top, both constants in `rules.py`:
   (`day_open`/`halt`/`resume` in the log, and a line in the recap). Open positions are deliberately
   *left alone*: their stops keep running. Market-selling everything into a falling market would
   realise the worst price of the day, which is the opposite of protecting the balance.
+
+### Near misses get another look
+
+Five of the six components — momentum, unique buyers, buy/sell ratio, holder growth,
+liquidity/mcap — are **conditions of the hour**, 85 of the 100 points. Only `smart_wallets` is
+structural: it depends on your own list, and with no list it is a fixed 0. Burying a coin for good
+on the other 85 contradicts the Filter, where R3 (thin liquidity — the same quantity
+`liquidity_to_mcap` measures as a ratio) only benches the coin for 30 minutes.
+
+So a score within `ANALYST_RETRY_WITHIN` (15 points) of the threshold benches the coin instead of
+killing it: at most `ANALYST_MAX_RETRIES` (2) extra looks, each after `ANALYST_RETRY_AFTER_S`
+(1 hour). Anything further below still dies on the spot, and a spent budget is permanent.
+
+The retry is deliberately much stricter than the Filter's bench, because the looks cost very
+different amounts: rules 3, 4 and 8 need no extra API calls, while an Analyst look costs a 300 s
+observation window plus RugCheck and RPC on the re-check. Re-observing every reject would starve
+the discovery of new coins. A benched coin always returns through **Scout → Filter**, so all 8 kill
+rules are replayed on fresh data — it can never come back straight to the Analyst.
+
+Observed case: `COGE` scored **57.9** (momentum 13.3/20, buyers 15/15, buy/sell 13.8/20, holder
+growth 15/15, liquidity/mcap **0.7**/15, smart wallets 0/15) and was buried for good. An hour later
+it was **+39%**, with liquidity/mcap still 0.051 against the 0.057 it was marked down for. One coin
+is an anecdote, not evidence — the argument is structural: that component measures the depth of the
+exit, not the return, and it was issuing a permanent verdict on an hourly number.
 
 ### Score weights
 momentum 20 · unique buyers 15 · buy/sell ratio 20 · holder growth 15 · liquidity/mcap 15 · smart wallets 15.

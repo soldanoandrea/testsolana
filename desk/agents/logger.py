@@ -64,6 +64,7 @@ class Logger:
         halts = [e for e in ev if e["event"] == "halt"]
         blind = [e for e in ev if e["event"] == "unprotected" and e.get("agent") == "risk"]
         recovered = [e for e in ev if e["event"] == "recovered"]
+        a_bench = [e for e in ev if e["event"] == "analyst_bench"]
         fallbacks = [e for e in ev if e["event"] == "price_fallback"]
         errors = [e for e in ev if e["event"] == "error"]
 
@@ -73,7 +74,8 @@ class Logger:
              f"- Killed by Filter: **{sum(kills.values())}**"]
         for n, name in rules.RULE_NAMES.items():
             L.append(f"  - Rule {n} `{name}`: {kills.get(name, 0)}")
-        L += [f"- Scored under {rules.ANALYST_MIN_SCORE} (Analyst kill): **{len(low_scores)}**",
+        L += [f"- Scored under {rules.ANALYST_MIN_SCORE} (Analyst kill): **{len(low_scores)}**"
+              + (f", of which {len(a_bench)} benched for another look" if a_bench else ""),
               f"- Trades opened: **{len(opens)}**, closed: **{len(closes)}**, still open: **{len(open_positions)}**",
               f"- W/L: **{len(wins)}/{len(losses)}**"]
         if closes:

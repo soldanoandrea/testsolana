@@ -17,7 +17,7 @@ def ds_pair(mint, price, created_s_ago=3 * 3600, **kw):
     p = {"pairAddress": "PAIR", "baseToken": {"address": mint, "symbol": "GOOD"}, "dexId": "pumpswap",
          "pairCreatedAt": int((time.time() - created_s_ago) * 1000), "priceUsd": str(price),
          "marketCap": 1_000_000, "liquidity": {"usd": FAKE_MARKET.liquidity}, "volume": {"h1": 300_000},
-         "priceChange": {"m5": 2, "h1": 30}, "txns": {"h1": {"buys": 900, "sells": 300}}}
+         "priceChange": {"m5": 2, "h1": FAKE_MARKET.chg_h1}, "txns": {"h1": {"buys": 900, "sells": 300}}}
     p.update(kw)
     return p
 
@@ -29,6 +29,7 @@ class Market:
     def reset(self):
         self.price, self.holders = 1.0, 1000
         self.liquidity = 220_000
+        self.chg_h1 = 30
         self.dex_down = self.jup_down = False
 
 
@@ -317,6 +318,103 @@ def test_a_sell_in_flight_is_not_started_twice(tmp_path, monkeypatch):
     assert "GOODMINT" in d.state.positions          # left to the sell already running
     assert not [e for e in d.log.events() if e["event"] == "trade_close"]
     FAKE_MARKET.reset()
+
+
+def near_miss_desk(tmp_path, monkeypatch, chg_h1=5):
+    """A market that scores inside the near-miss band: liq/mcap at the floor, weak momentum."""
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    FAKE_MARKET.liquidity = 50_000       # liq/mcap 0.05 -> 0 of 15, but still past R3
+    FAKE_MARKET.chg_h1 = chg_h1
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    return d
+
+
+def one_look(d, first=False):
+    """A full Analyst look: Scout -> Filter -> observe -> window -> score.
+
+    Holders grow during every window, so holder_growth stays maxed and the shortfall comes only
+    from liq/mcap and momentum — the same shape as the real COGE score (57.9).
+    """
+    if not first:
+        d.state.benched["GOODMINT"] = time.time() - 1      # its hour is up
+    d.pipeline_tick()
+    FAKE_MARKET.holders += 200
+    d.analyst.watching["GOODMINT"].t0 -= 600
+    d.pipeline_tick()
+    return [e for e in d.log.events() if e["event"] == "score"][-1]["total"]
+
+
+def test_a_near_miss_score_is_benched_not_buried(tmp_path, monkeypatch):
+    """85 of the 100 points are hour conditions, so a near miss must not be a permanent verdict."""
+    d = near_miss_desk(tmp_path, monkeypatch)
+    try:
+        total = one_look(d, first=True)
+        assert rules.ANALYST_MIN_SCORE - rules.ANALYST_RETRY_WITHIN <= total < rules.ANALYST_MIN_SCORE, total
+        assert "GOODMINT" not in d.state.dead
+        assert "GOODMINT" in d.state.benched
+        assert d.state.analyst_retries["GOODMINT"] == 1
+        assert "GOODMINT" not in d.analyst.scored          # observe() would refuse it otherwise
+        b = [e for e in d.log.events() if e["event"] == "analyst_bench"][0]
+        assert b["attempt"] == 1 and b["score"] == total
+
+        # the hour turns: deeper liquidity, real momentum, holders growing
+        FAKE_MARKET.liquidity, FAKE_MARKET.chg_h1 = 220_000, 30
+        assert one_look(d) >= rules.ANALYST_MIN_SCORE       # Scout -> Filter -> observed -> scored
+        assert "GOODMINT" in d.state.positions             # second look, and this time it trades
+        assert "GOODMINT" not in d.state.analyst_retries   # budget cleared on a pass
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_a_bad_score_still_dies_for_good(tmp_path, monkeypatch):
+    """"Under 70 dies" still means dies: only a near miss buys another look."""
+    d = near_miss_desk(tmp_path, monkeypatch, chg_h1=0)
+    try:
+        total = one_look(d, first=True)
+        assert total < rules.ANALYST_MIN_SCORE - rules.ANALYST_RETRY_WITHIN, total
+        assert "GOODMINT" in d.state.dead and "GOODMINT" not in d.state.benched
+        assert not [e for e in d.log.events() if e["event"] == "analyst_bench"]
+        assert not d.state.analyst_retries
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_the_retry_budget_runs_out(tmp_path, monkeypatch):
+    """The Analyst's look is expensive, so a coin cannot keep buying new ones forever."""
+    d = near_miss_desk(tmp_path, monkeypatch)
+    try:
+        one_look(d, first=True)                 # look 1 -> benched, attempt 1
+        for _ in range(rules.ANALYST_MAX_RETRIES):
+            one_look(d)
+        assert "GOODMINT" in d.state.dead                   # budget spent, now permanent
+        assert "GOODMINT" not in d.state.benched
+        assert not d.state.analyst_retries
+        benches = [e for e in d.log.events() if e["event"] == "analyst_bench"]
+        assert [b["attempt"] for b in benches] == list(range(1, rules.ANALYST_MAX_RETRIES + 1))
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_a_benched_near_miss_must_pass_the_filter_again(tmp_path, monkeypatch):
+    """It returns through Scout -> Filter: it can never come back straight to the Analyst."""
+    d = near_miss_desk(tmp_path, monkeypatch)
+    try:
+        one_look(d, first=True)
+        assert "GOODMINT" in d.state.benched
+        FAKE_MARKET.liquidity = 10_000                      # now it fails R3
+        d.state.benched["GOODMINT"] = time.time() - 1
+        d.pipeline_tick()
+        assert "GOODMINT" not in d.analyst.watching         # killed by the Filter, not re-observed
+        assert [e for e in d.log.events() if e["event"] == "kill" and e["rule"] == 3]
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_the_analyst_cooldown_is_longer_than_the_filter_bench():
+    """A 300 s observation window plus RugCheck and RPC must not be retried as cheaply as R3."""
+    assert rules.ANALYST_RETRY_AFTER_S > rules.FILTER_BENCH_S
 
 
 def paper_log(tmp_path, closes=20, pnl_each=1.0, extra=()):

@@ -123,12 +123,39 @@ class Desk:
                 continue
             s = self.analyst.score(w, fresh, v)              # ANALYST -> EXECUTOR (70+ only)
             if s.total < rules.ANALYST_MIN_SCORE:
-                self.state.dead.add(fresh.mint)
+                self._after_low_score(fresh, s)
                 continue
+            self.state.analyst_retries.pop(fresh.mint, None)
             # Deliberately not under the desk lock: a live buy can take minutes to confirm, and
             # the stop monitor has to keep running meanwhile. State serialises its own writes.
             self.executor.enter(s)
         self._save()
+
+    def _after_low_score(self, pair: Pair, s) -> None:
+        """Under 70 dies — but a near miss on the hour's numbers gets a second look, not a grave.
+
+        Five of the six components (85 of the 100 points) are conditions that change by the hour,
+        which is the same reason rules 3, 4 and 8 bench instead of killing. The Analyst's look is
+        far more expensive than those rules, though, so this is deliberately much stricter: within
+        ANALYST_RETRY_WITHIN of the threshold, at most ANALYST_MAX_RETRIES times, after an hour.
+
+        A benched coin returns through Scout -> Filter like any other, so all 8 kill rules are
+        replayed on fresh data. It can never come back straight to the Analyst.
+        """
+        spent = self.state.analyst_retries.get(pair.mint, 0)
+        near_miss = s.total >= rules.ANALYST_MIN_SCORE - rules.ANALYST_RETRY_WITHIN
+        if not near_miss or spent >= rules.ANALYST_MAX_RETRIES:
+            self.state.dead.add(pair.mint)
+            self.state.benched.pop(pair.mint, None)
+            self.state.analyst_retries.pop(pair.mint, None)
+            return
+        self.state.analyst_retries[pair.mint] = spent + 1
+        self.state.benched[pair.mint] = time.time() + rules.ANALYST_RETRY_AFTER_S
+        self.analyst.scored.discard(pair.mint)        # or observe() would refuse it on the way back
+        self.log.log("analyst_bench", mint=pair.mint, symbol=pair.symbol, score=s.total,
+                     needed=rules.ANALYST_MIN_SCORE, attempt=spent + 1, of=rules.ANALYST_MAX_RETRIES,
+                     retry_after_s=rules.ANALYST_RETRY_AFTER_S,
+                     detail="near miss on the hour's numbers")
 
     def _fresh_pair(self, old: Pair) -> Pair | None:
         try:

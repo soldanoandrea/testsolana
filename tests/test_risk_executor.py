@@ -288,6 +288,15 @@ def test_a_normal_entry_leaves_no_pending_record(tmp_path, log):
     assert st.pending_entry is None
 
 
+def test_the_analyst_retry_count_survives_a_restart(tmp_path, log):
+    st = State(path=tmp_path / "s.json", cash=1000.0, start_balance=1000.0)
+    st.analyst_retries["MINT"] = 1
+    st.benched["MINT"] = 123.0
+    st.save()
+    back = State.load(st.path, 1000.0, log=log)
+    assert back.analyst_retries == {"MINT": 1} and back.benched == {"MINT": 123.0}
+
+
 def test_the_pending_record_survives_a_restart(tmp_path, log):
     st = State(path=tmp_path / "s.json", cash=1000.0, start_balance=1000.0)
     pending(st)
