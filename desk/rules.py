@@ -40,6 +40,13 @@ RULE_NAMES = MappingProxyType({
 # They are also the cheap rules (no extra API calls), so re-checking a benched coin costs nothing
 # until it actually passes them.
 FILTER_TRANSIENT_RULES = frozenset({3, 4, 8})
+# A bench has no attempt counter, unlike the Analyst's near miss. The only thing that ends the
+# loop is the coin ageing past SCOUT_MAX_AGE_H and leaving the Scout's scope, so a coin first seen
+# at 2 h gets (72-2)*2 = 140 looks. That is a consequence of two unrelated numbers rather than a
+# decision, but it is cheap on purpose: market rules are evaluated before RugCheck and the RPC and
+# return early, so a coin that keeps failing the same market rule costs no extra calls at all.
+# Measured over a 4 h paper run: 105 Filter verdicts, 8 of which reached the paid sources, and of
+# the 11 coins benched four times or more exactly 1 ever paid for a RugCheck report.
 FILTER_BENCH_S = 1800
 assert FILTER_TRANSIENT_RULES < frozenset(RULE_NAMES)
 

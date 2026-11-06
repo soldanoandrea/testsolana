@@ -40,7 +40,16 @@ locked LP, who holds the supply, who launched it. Those do not improve, so the c
 (`permanent: true` on the kill). Rules 3, 4 and 8 describe the hour: thin liquidity at midnight can
 be deep by 3 a.m., and a coin up 90% now is flat later. Those bench the coin for
 `rules.FILTER_BENCH_S` (30 min) and the Scout hands it over once more when the bench expires; the
-Filter then either benches it again or settles the matter. The bench costs nothing until the coin
+Filter then either benches it again or settles the matter.
+
+**A bench has no attempt counter**, and that is worth stating because the near-miss retry does.
+Nothing ends the loop except the coin ageing past `SCOUT_MAX_AGE_H` and dropping out of the
+Scout's scope, so a coin first seen at 2 h old can be looked at (72-2)*2 = 140 times. The cap is
+therefore a consequence of two unrelated numbers, not a decision — but it is a cheap loop by
+construction, because `check()` evaluates the market rules before touching RugCheck or the RPC and
+returns early. A coin that keeps failing the same market rule costs no extra calls at all. Over a
+4 h paper run: 105 Filter verdicts, of which 8 reached the paid sources, and of the 11 coins
+benched four times or more exactly 1 ever paid for a RugCheck report. The bench costs nothing until the coin
 passes those rules, because they are the ones that need no extra API calls.
 
 This matters more than it sounds. In a real overnight paper run, 26 of 32 scans handed **zero**

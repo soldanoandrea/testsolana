@@ -74,3 +74,42 @@ def test_a_bench_that_is_due_comes_back_whatever_seen_says():
     s, dex = _scout({"MINT"}, seen={"MINT"}, benched={"MINT": time.time() - 1})
     s.scan()
     assert dex.asked == [{"MINT"}]
+
+
+def test_the_scan_event_shows_the_whole_funnel():
+    """153 candidates becoming 1 hand-off is the night's real shape; the log has to show it.
+
+    A mint only enters `seen` once it has been handed over, so one that is out of scope is asked
+    about again on every scan. With only the two ends logged, that re-asking was invisible: the
+    scan event named a count and a hand-off and nothing in between.
+    """
+    now = time.time() * 1000
+
+    class Dex:
+        def discover_mints(self):
+            return {"INSCOPE", "TOOOLD", "NOPAIR"}
+
+        def pairs_for_mints(self, mints):
+            return [_ds("INSCOPE", now - 3 * 3600_000),      # in scope
+                    _ds("TOOOLD", now - 100 * 3600_000)]     # has a pair, aged out
+
+    src = type("S", (), {})()
+    src.dex, src.gt = Dex(), _NoGT()
+    events = []
+    s = Scout(src, type("L", (), {"log": lambda self, e, **k: events.append((e, k))})())
+    out = s.scan()
+
+    assert [p.mint for p in out] == ["INSCOPE"]
+    scan = dict(next(k for e, k in events if e == "scan"))
+    assert scan["candidates"] == 3          # all three asked about
+    assert scan["with_pair"] == 2           # NOPAIR came back with nothing
+    assert scan["out_of_scope"] == 1        # TOOOLD had a pair but failed in_scope
+    assert scan["handed_to_filter"] == 1
+    assert "TOOOLD" not in s.seen and "NOPAIR" not in s.seen   # so both are asked again next scan
+
+
+def _ds(mint, created_ms):
+    return {"pairAddress": "P", "baseToken": {"address": mint, "symbol": "X"}, "dexId": "pumpswap",
+            "pairCreatedAt": int(created_ms), "priceUsd": "1.0", "marketCap": 1_000_000,
+            "liquidity": {"usd": 220_000}, "volume": {"h1": 300_000},
+            "priceChange": {"m5": 2, "h1": 30}, "txns": {"h1": {"buys": 900, "sells": 300}}}

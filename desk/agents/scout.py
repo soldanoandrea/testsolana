@@ -41,7 +41,7 @@ class Scout:
         # a coin never seen and come straight back, expiry ignored, and again when it fell due.
         candidates = (mints - self.seen - set(self.benched)) | due   # `| due` is the way back in
         if not candidates:
-            self.log.log("scan", discovered=0, handed_to_filter=0, benched=len(self.benched))
+            self.log.log("scan", candidates=0, handed_to_filter=0, benched=len(self.benched))
             return []
         try:
             raw = self.src.dex.pairs_for_mints(candidates)
@@ -51,12 +51,16 @@ class Scout:
 
         # one pair per mint: the most liquid in-scope pair
         best: dict[str, Pair] = {}
+        with_pair: set[str] = set()
         for r in raw:
             try:
                 p = Pair.from_dexscreener(r)
             except (KeyError, TypeError):
                 continue
-            if p.mint not in candidates or not in_scope(p):
+            if p.mint not in candidates:
+                continue
+            with_pair.add(p.mint)
+            if not in_scope(p):
                 continue
             if p.mint not in best or p.liquidity_usd > best[p.mint].liquidity_usd:
                 best[p.mint] = p
@@ -77,6 +81,11 @@ class Scout:
         for p in out:
             self.seen.add(p.mint)
             self.log.log("scouted", **p.brief())
-        self.log.log("scan", discovered=len(candidates), handed_to_filter=len(out),
+        # `candidates` is what was asked about, not what was discovered: a mint only enters `seen`
+        # once it has been handed over, so one that is out of scope is asked about again every
+        # scan. Logging the whole funnel is what makes that visible instead of inferred from the
+        # gap between the two ends of it.
+        self.log.log("scan", candidates=len(candidates), with_pair=len(with_pair),
+                     out_of_scope=len(with_pair) - len(best), handed_to_filter=len(out),
                      retried_from_bench=len(due), benched=len(self.benched))
         return out
