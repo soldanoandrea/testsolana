@@ -287,6 +287,35 @@ wider slippage (6%, then 12%, then 24%, capped there) so exits get out, and the 
 on the position so the next tick carries on widening instead of restarting at 3%. Use a private RPC
 (`SOLANA_RPC_URL`, e.g. Helius) because the public one rate-limits.
 
+### A missing buyer count is a silent disqualification
+
+`buyers_h1` comes from GeckoTerminal's hourly pool activity, and over the first day of paper it was
+**absent in 3 of 13 scores (23%)** — `ROCCO` 42.0, `401kinu` 27.9, `WHITE` 26.6. A component with no
+data scores 0, which is the right rule: the desk never guesses a score upward. But the arithmetic
+of that zero deserves stating plainly.
+
+| Available | Ceiling |
+|---|---|
+| everything | 100 |
+| no `smart_wallets.txt` | 85 |
+| no list **and** no buyer count | **70** |
+
+The threshold is 70, so when both are missing a coin can only pass with a *perfect* score on all
+four remaining components at once — momentum 20/20, buy/sell 20/20, holder growth 15/15 and
+liquidity/mcap 15/15. That is reachable on paper (it totals exactly 70.0 and passes) and not
+reachable in practice: none of the thirteen scores came within 30 points of it.
+
+So for roughly a quarter of the coins that reach the Analyst, the desk is not deciding on the
+market — it is sitting out because a third-party field was unavailable, and the log says
+`buyers_h1: null` without saying that this made entry unreachable. Two things follow. The 15 points
+of an empty wallet list cost more than they appear to, because they are what turns a data gap into a
+hard ceiling at the threshold. And a retry spent on a coin whose buyer count was missing is a
+window, a RugCheck call and an RPC call spent on a verdict that was decided before the look began.
+
+Nothing is changed here: both the zero and the threshold are deliberate, and 13 scores is not enough
+to re-weight anything. It is written down because the shape of the problem — a measurement absent
+rather than bad — is the kind that reads as a market verdict in the log.
+
 ### Open question: is the near-miss bench worth its cost?
 
 The retry added in `d63da24` has now run four times, and three of the four scores came back worse.
