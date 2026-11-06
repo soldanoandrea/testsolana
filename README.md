@@ -90,6 +90,16 @@ So a score within `ANALYST_RETRY_WITHIN` (15 points) of the threshold benches th
 killing it: at most `ANALYST_MAX_RETRIES` (2) extra looks, each after `ANALYST_RETRY_AFTER_S`
 (1 hour). Anything further below still dies on the spot, and a spent budget is permanent.
 
+**The retry and the weak curve are coupled, and one of the two retries granted so far rests on
+it.** Both near misses cleared the 55-point floor by very little with `buy_sell_ratio` at full
+marks: `COGE` (ES9Fint) by +1.6 with a ratio of 3.52, and `AMD` (oCZHH8) by **+0.9** with a ratio
+of **2.042** — two per cent past the point where that curve stops counting. As a sensitivity
+check, widening only that band to 1.0→2.5 leaves COGE a near miss (3.52 still saturates) but
+drops AMD to 49.8, which is a permanent kill rather than a retry. So the cheapest signal in the
+score is what bought AMD its second look. Two coins is not evidence to change a curve on, and
+nothing has been changed — but when the bands are revisited this coupling is the reason to look
+at the retry floor in the same pass.
+
 The retry is deliberately much stricter than the Filter's bench, because the looks cost very
 different amounts: rules 3, 4 and 8 need no extra API calls, while an Analyst look costs a 300 s
 observation window plus RugCheck and RPC on the re-check. Re-observing every reject would starve
