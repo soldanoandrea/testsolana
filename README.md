@@ -305,6 +305,22 @@ Eight minutes after the refusal the pool was empty: **liquidity $0**, zero trans
 trailing 5 minutes, against 3,060 buys in the preceding hour. The quoted price (+174%) is a price in
 a pool nobody can sell into.
 
+Those buys were not 3,060 buyers. GeckoTerminal's distinct counts for the same hour: **23 buyers and
+22 sellers** behind 2,686 buys and 2,384 sells — about 117 trades per wallet, the same couple of
+dozen addresses on both sides. The top 20 holders held **100.00%** of supply; the other 713 holder
+accounts held 0.0009% between them, and RugCheck linked **2,002 addresses**. So the $7.9M of volume
+and the +8,311% on the day were manufactured inside a closed loop. Almost nobody independent was
+rugged because almost nobody independent was ever in.
+
+Two further things the scoring would have said, had the coin reached the Analyst. It would have
+scored **33.2**, and the buyer side — `unique_buyers` plus `buy_sell_ratio`, the 35 points measured
+elsewhere in this file as saturating and generous — would have paid **0.9 of 35**: 23 buyers is 0/15
+against a band starting at 50, and a 1.045 ratio is 0.9/20. Those bands are one-sided rather than
+useless: they cannot separate 185 buyers from 3,182, but they separate 23 from 185 decisively. And
+`liquidity_to_mcap` would have paid a full **15/15** on the pool that was about to be withdrawn,
+which is the clearest statement of why R2 is a separate question: how deep the pool is and whether it
+can be taken away are not the same measurement.
+
 Two things follow, and they are why this is written down rather than told as a story:
 
 1. **R2 named the mechanism, not a proxy for it.** The coin was refused precisely because the LP was
