@@ -287,6 +287,58 @@ wider slippage (6%, then 12%, then 24%, capped there) so exits get out, and the 
 on the position so the next tick carries on widening instead of restarting at 3%. Use a private RPC
 (`SOLANA_RPC_URL`, e.g. Helius) because the public one rate-limits.
 
+### The first trade the desk nearly took: APPLEPAID, 2026-11-06
+
+`APPLEPAID` (`APgbBfggjo79T7PdVqTQcEbVdQWBCif1kLTwjRwrxc8Z`) scored **61.2** at 15:26 — the highest
+of the first 16 hours of paper, against the 70 needed — and was benched as a near miss. Its mcap was
+$276,796, so it only reached the Analyst at all because the Scout's floor had been lowered to $250k
+earlier the same day. An hour later, on the retry, it scored **46.7** and died for good.
+
+What the two looks show, side by side:
+
+| Component | 15:26 | 16:33 |
+|---|---|---|
+| momentum | 10.2 | **0.0** (1 h change +79.4% → −24.4%) |
+| unique_buyers | 15.0 | 15.0 (1,006 → 1,076 buyers) |
+| buy_sell_ratio | 8.6 | 4.1 |
+| holder_growth | 15.0 | 12.6 (+39.5%/h → +16.9%/h) |
+| liquidity_to_mcap | 12.4 | **15.0** |
+| smart_wallets | 0.0 | 0.0 |
+| **total** | **61.2** | **46.7** |
+
+**`liquidity_to_mcap` rose to full marks because the coin collapsed.** Mcap fell from $294,753 to
+$225,138 while liquidity only fell from $50,771 to $45,065, so the ratio reached exactly 0.20, the
+band ceiling. That is mechanically right — the pool *is* proportionally deeper — but it means a coin
+losing a quarter of its value earns points there. Second time in one day: LIA was paid a full 15/15
+on a pool that was emptied eight minutes later.
+
+**And it would have been a losing trade.** Simulated with the real constants — 5% of balance, the
+paper fill's 1.5% slippage and 0.3% fee, `RISK_STOP_PCT` −30%, `RISK_TRAIL_ACTIVATE_PCT` +60% —
+against the pool's minute candles from the entry:
+
+```
+entry 15:26   $50.00   fill 0.0003036   stop 0.0002125   trail arms at 0.0004857
+peak          0.0003758  = +23.8% from fill   -> trail never armed
+low           0.0002112  = -30.4%             -> stop breached by 0.6%
+exit on stop  0.0002125  -> $34.18 back       -> -$15.82, -31.6% of the position
+```
+
+Three things worth keeping from it:
+
+1. **Nothing protects a gain below +60%.** The position went to +23.8% and came all the way back
+   through it with the stop still sitting where entry had put it. Risking 30% while locking in
+   nothing until 60% is a deliberate choice in `rules.py`, but it had never been looked at against a
+   real path before this one.
+2. **The stop's exact level was decided by noise.** The low undercut the stop by 0.6%; a stop at
+   −31% would not have fired, and an hour later that position would have been at −23.1% rather than
+   −31.6% realised. On a coin that did +23.8%, −30.4% and −22.8% inside ninety minutes, one trade
+   teaches nothing about where the stop belongs.
+3. **The empty `smart_wallets.txt` is what kept the desk out.** With two wallets from a list holding
+   the coin, 61.2 becomes 76.2 and the Executor enters. The 15 points documented elsewhere in this
+   file as the cost of having no list would have bought a $15.82 loss here. That is one observation,
+   not a principle — a desk that never enters never earns — but it is the reason the list has to be
+   verified forward before it is switched on, rather than filled because 15 points are missing.
+
 ### What a refusal is worth: LIA, 2026-11-06
 
 The desk had not opened a trade in twelve hours when it looked at `LIA`
