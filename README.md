@@ -287,6 +287,35 @@ wider slippage (6%, then 12%, then 24%, capped there) so exits get out, and the 
 on the position so the next tick carries on widening instead of restarting at 3%. Use a private RPC
 (`SOLANA_RPC_URL`, e.g. Helius) because the public one rate-limits.
 
+### What a refusal is worth: LIA, 2026-11-06
+
+The desk had not opened a trade in twelve hours when it looked at `LIA`
+(`VLxDCjbbJ853sqtmiXfpWuYMRvDTRrYWf2GuS4GZjNv`) at 12:27 and killed it on **R2** — LP locked or
+burned 0.0% against the 95% required — listing R5 (top 10 at 58.1%) and R6 (dev at 32.73%) behind it.
+
+What the pair looked like: mcap $251,811, liquidity $88,825, and **$7,939,040 of 1 h volume** — 31x
+the market cap in an hour — up 58% on the hour. Reading the same RugCheck fields eight minutes later
+through the same code path put the creator at **81.39%** of supply, not 32.73%: the volume was in
+good part the dev reaccumulating. Of 733 holders, the top 12 held 94.32%, and the eleven wallets
+below the creator held 1.16–1.20% each — near-identical slices, one actor across many addresses,
+which is what RugCheck's insider networks also report (1,973 wallets at 17.73%, plus clusters of 4
+to 10).
+
+Eight minutes after the refusal the pool was empty: **liquidity $0**, zero transactions in the
+trailing 5 minutes, against 3,060 buys in the preceding hour. The quoted price (+174%) is a price in
+a pool nobody can sell into.
+
+Two things follow, and they are why this is written down rather than told as a story:
+
+1. **R2 named the mechanism, not a proxy for it.** The coin was refused precisely because the LP was
+   free to be withdrawn, and withdrawing it is what happened. A generic "looks risky" filter would
+   not have earned this.
+2. **The stop would not have saved the position.** At 5% of balance the entry would have been ~$50,
+   and a −30% stop cannot execute into zero liquidity. This is the first limitation below, observed
+   rather than argued: the protection that mattered was refusing to enter, not the exit.
+
+An empty night is the cost of this; LIA is what it buys.
+
 ### Honest limitations
 - **A −30% stop is not guaranteed on Solana.** There are no native stop orders, so the desk watches
   the price every 10 s and sells with a market swap. A rug or a sharp candle can gap far below the stop.
