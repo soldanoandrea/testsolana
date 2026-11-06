@@ -572,6 +572,36 @@ def test_a_rebenched_budget_is_cleared_if_the_coin_never_comes_back(tmp_path, mo
         FAKE_MARKET.reset()
 
 
+def test_a_restart_does_not_shorten_the_near_miss_cooldown(tmp_path, monkeypatch):
+    """b69f177 kept the attempts but not the hour, because the bench leant on `seen`.
+
+    Re-benching an in-flight near miss is only worth anything if the bench then holds. It did not:
+    `seen` is rebuilt from dead|traded, so the coin came back on the next scan and the 300 s
+    window plus RugCheck and RPC started again immediately -- the attempts were counted, but the
+    cooldown they were supposed to buy was not served.
+    """
+    d = near_miss_desk(tmp_path, monkeypatch)
+    try:
+        one_look(d, first=True)
+        assert d.state.analyst_retries["GOODMINT"] == 1
+        due_at = d.state.benched["GOODMINT"]
+        assert due_at > time.time() + 60                     # an hour to run
+
+        looks = len(scouted(d))                              # both desks share events.jsonl
+        back = near_miss_desk(tmp_path, monkeypatch)         # restart, same data dir
+        assert back.state.benched["GOODMINT"] == due_at      # the hour is still to run
+        back.pipeline_tick()
+        assert len(scouted(back)) == looks                   # so: no look, no window, no calls
+        assert "GOODMINT" not in back.analyst.watching
+        assert back.state.analyst_retries["GOODMINT"] == 1   # and the attempt still stands
+
+        back.state.benched["GOODMINT"] = time.time() - 1     # when the hour is really up
+        back.pipeline_tick()
+        assert len(scouted(back)) == looks + 1               # it comes back, once
+    finally:
+        FAKE_MARKET.reset()
+
+
 def test_the_analyst_cooldown_is_longer_than_the_filter_bench():
     """A 300 s observation window plus RugCheck and RPC must not be retried as cheaply as R3."""
     assert rules.ANALYST_RETRY_AFTER_S > rules.FILTER_BENCH_S

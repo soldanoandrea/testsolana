@@ -98,6 +98,15 @@ one. The same sweep covers the other ways a returning coin stops being eligible:
 burying it on the re-check, or its pair vanishing. A coin still in flight keeps its budget, or a
 near miss would buy a fresh look every tick.
 
+**The bench holds on its own.** `benched` is persisted, but for a long time the thing that
+actually kept a benched coin out of the next scan was the Scout's `seen` set, which is not: it is
+rebuilt from `dead | traded` at startup. Within a session the two agreed, so this only bit after a
+restart, where a benched coin looked like a coin never seen, came straight back with its wait
+ignored, and came back again when it fell due. On the paper desk's own state that was 14 of 18
+scouted coins returning to the Filter instead of 4. `scan()` now excludes everything in `benched`
+outright and lets `| due` be the single way back in, so the wait no longer depends on a set that
+does not survive a restart.
+
 A restart is the one case where "in flight" cannot be read off the disk, because neither the
 Analyst's window nor the Scout's `seen` set is persisted. A budget with no bench behind it is
 therefore a coin that was mid-pipeline when the desk went down — and since `seen` is gone too, it

@@ -35,7 +35,11 @@ class Scout:
                 self.log.log("error", agent="scout", detail=str(e))
         now = time.time()
         due = {m for m, t in self.benched.items() if now >= t}
-        candidates = (mints - self.seen) | due      # a due bench overrides "already seen"
+        # A bench has to hold on its own, not because the mint happens to sit in `seen`. Within one
+        # session the two agree -- the mint went into `seen` when it was handed over -- but `seen`
+        # is rebuilt from dead|traded at startup, so after a restart a benched coin would look like
+        # a coin never seen and come straight back, expiry ignored, and again when it fell due.
+        candidates = (mints - self.seen - set(self.benched)) | due   # `| due` is the way back in
         if not candidates:
             self.log.log("scan", discovered=0, handed_to_filter=0, benched=len(self.benched))
             return []
