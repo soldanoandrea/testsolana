@@ -602,6 +602,41 @@ def test_a_restart_does_not_shorten_the_near_miss_cooldown(tmp_path, monkeypatch
         FAKE_MARKET.reset()
 
 
+def test_a_market_kill_on_the_way_back_rewrites_the_analyst_cooldown(tmp_path, monkeypatch):
+    """`benched` is one dict written by two mechanisms with different waits, and last write wins.
+
+    A near miss is benched for ANALYST_RETRY_AFTER_S (an hour). If it returns and a market rule
+    kills it, the Filter overwrites that entry with FILTER_BENCH_S (half an hour), so the next
+    expensive look can come an hour and a half after the score rather than two hours. Observed on
+    AMD (oCZHH8): scored 55.9 at 06:15, R8 at 07:15, next look at 07:45.
+
+    This is pinned rather than changed. The ceiling still holds -- the budget is only spent when a
+    score happens, so the expensive looks stay capped at three -- and the coin still has to pass
+    all eight rules to get one. Only the spacing moves, and tightening it would change which coins
+    come back and when, which is a trading decision.
+    """
+    d = near_miss_desk(tmp_path, monkeypatch)
+    try:
+        one_look(d, first=True)
+        assert d.state.analyst_retries["GOODMINT"] == 1
+        analyst_due = d.state.benched["GOODMINT"]
+
+        FAKE_MARKET.chg_h1 = 95                             # R8 on the way back: transient
+        d.state.benched["GOODMINT"] = time.time() - 1
+        d.pipeline_tick()
+
+        k = [e for e in d.log.events() if e["event"] == "kill" and e["rule"] == 8][-1]
+        assert k["permanent"] is False
+        assert "GOODMINT" not in d.state.dead               # R8 benches, it does not bury
+        assert d.state.analyst_retries["GOODMINT"] == 1      # no score, so no attempt spent
+
+        filter_due = d.state.benched["GOODMINT"]
+        assert abs(filter_due - (time.time() + rules.FILTER_BENCH_S)) < 5
+        assert filter_due < analyst_due + rules.ANALYST_RETRY_AFTER_S   # the hour was rewritten
+    finally:
+        FAKE_MARKET.reset()
+
+
 def test_the_analyst_cooldown_is_longer_than_the_filter_bench():
     """A 300 s observation window plus RugCheck and RPC must not be retried as cheaply as R3."""
     assert rules.ANALYST_RETRY_AFTER_S > rules.FILTER_BENCH_S
