@@ -113,3 +113,77 @@ def _ds(mint, created_ms):
             "pairCreatedAt": int(created_ms), "priceUsd": "1.0", "marketCap": 1_000_000,
             "liquidity": {"usd": 220_000}, "volume": {"h1": 300_000},
             "priceChange": {"m5": 2, "h1": 30}, "txns": {"h1": {"buys": 900, "sells": 300}}}
+
+
+class _RowDex(_CountingDex):
+    """Like _CountingDex, but answers with DexScreener-shaped rows."""
+
+    def __init__(self, discovered, rows):
+        super().__init__(discovered)
+        self.rows = rows
+
+    def pairs_for_mints(self, mints):
+        self.asked.append(set(mints))
+        return [r for r in self.rows if r["baseToken"]["address"] in mints]
+
+
+def _row(mint, *, age_h=3.0, mcap=1_000_000, dex="pumpswap", created_at_ms=None, pair="P"):
+    ms = int((time.time() - age_h * 3600) * 1000) if created_at_ms is None else created_at_ms
+    return {"pairAddress": pair, "baseToken": {"address": mint, "symbol": mint}, "dexId": dex,
+            "pairCreatedAt": ms, "priceUsd": "0.001", "marketCap": mcap,
+            "liquidity": {"usd": 150_000}, "volume": {"h1": 200_000},
+            "priceChange": {"h1": 25.0, "m5": 2.0}, "txns": {"h1": {"buys": 9, "sells": 4}}}
+
+
+def _scout_rows(discovered, rows):
+    src = type("S", (), {})()
+    src.dex, src.gt = _RowDex(discovered, rows), _NoGT()
+    return Scout(src, type("L", (), {"log": lambda *a, **k: None})()), src.dex
+
+
+def test_a_token_past_the_age_ceiling_is_only_asked_about_once():
+    """Age is the one disqualification that cannot reverse, so re-asking is pure waste.
+
+    Measured on a live scan: 153 candidates, 152 out of scope, and half of those were older than
+    72h -- asked again every two minutes for as long as the feeds kept listing them.
+    """
+    s, dex = _scout_rows({"OLD"}, [_row("OLD", age_h=73)])
+    assert s.scan() == [] and dex.asked == [{"OLD"}]
+    assert "OLD" in s.aged_out
+    assert s.scan() == [] and dex.asked == [{"OLD"}]      # not asked a second time
+
+
+def test_an_unknown_creation_time_is_never_cached_as_old():
+    """`created_at_ms` falls back to 0, which reads as an age of ~29 million minutes.
+
+    Caching that would drop a brand-new pair for ever, silently -- the exact shape of bug this
+    cache could introduce, so the guard matters more than the saving.
+    """
+    s, dex = _scout_rows({"NEW"}, [_row("NEW", created_at_ms=0)])
+    s.scan()
+    assert s.aged_out == set()
+    s.scan()
+    assert dex.asked == [{"NEW"}, {"NEW"}]               # asked again, as it must be
+
+
+def test_a_small_mcap_is_asked_about_again():
+    """The other half of what each scan wastes is mcap under 300k, which can grow into the band."""
+    s, dex = _scout_rows({"SMALL"}, [_row("SMALL", mcap=299_999)])
+    s.scan()
+    s.scan()
+    assert s.aged_out == set() and dex.asked == [{"SMALL"}, {"SMALL"}]
+
+
+def test_one_old_pool_does_not_cache_a_token_that_also_has_a_fresh_one():
+    """A token is cached only when every pair that came back for it is past the ceiling.
+
+    `best` keeps the most liquid in-scope pair, so the old pool is the one we may happen to see
+    first; it says nothing about the token.
+    """
+    rows = [_row("MIXED", age_h=73, pair="OLDPOOL"),
+            _row("MIXED", age_h=3, mcap=299_999, pair="NEWPOOL")]
+    s, dex = _scout_rows({"MIXED"}, rows)
+    assert s.scan() == []                                # out of scope on mcap, not handed over
+    assert s.aged_out == set()                           # but not written off either
+    s.scan()
+    assert dex.asked == [{"MIXED"}, {"MIXED"}]

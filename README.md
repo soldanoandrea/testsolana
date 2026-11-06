@@ -49,6 +49,26 @@ be deep by 3 a.m., and a coin up 90% now is flat later. Those bench the coin for
 `rules.FILTER_BENCH_S` (30 min) and the Scout hands it over once more when the bench expires; the
 Filter then either benches it again or settles the matter.
 
+**What each scan actually spends itself on.** A mint only enters `seen` once it has been handed
+over, so one that is out of scope is asked about again on every scan, for as long as the feeds keep
+listing it. Measured on a live scan (09:23 on 2026-11-06): 153 candidates, 153 of which came back
+with a live pair, and **152 out of scope** — one hand-off. Classifying those 132 out-of-scope
+tokens by *why* they failed:
+
+| Disqualification | Share | Reversible? |
+|---|---|---|
+| age over 72 h | 50% (59 plain + 7 also on an unsupported dex) | no — age only grows |
+| mcap under $300k | 50% (66) | **yes** — it can grow into the band |
+
+Only age is cached (`Scout.aged_out`). A small mcap can grow into the band, and a `dex_id` belongs
+to the pair we happened to pick rather than to the token, so neither is ever written off. A token is
+cached only when *every* pair that came back for it is past the ceiling, and a missing
+`pairCreatedAt` — which `from_dexscreener` reads as `0`, i.e. an age of ~29 million minutes — is
+never treated as old: that mistake would drop a new coin silently and for ever. The set lives in RAM
+because it is recomputed from the next answer, so losing it costs one request, whereas persisting a
+decision whose input is not persisted is exactly what broke the bench. Worth ~48% of the
+~700 DexScreener calls a 4 h run was spending.
+
 **A bench has no attempt counter**, and that is worth stating because the near-miss retry does.
 Nothing ends the loop except the coin ageing past `SCOUT_MAX_AGE_H` and dropping out of the
 Scout's scope, so a coin first seen at 2 h old can be looked at (72-2)*2 = 140 times. The cap is
