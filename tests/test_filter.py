@@ -4,6 +4,7 @@ import pytest
 from conftest import make_pair, make_report
 from desk import rules
 from desk.agents.filter import Filter, build_safety, market_rules, safety_rules
+from desk.models import Safety
 from desk.http import DataUnavailable
 
 
@@ -165,3 +166,43 @@ def test_rule7_insider_networks(log):
 
 def test_rule7_insiders_without_sizes_is_dead(log):
     assert run(log, report=make_report(insiderNetworks=None, graphInsidersDetected=30)).rule == 7
+
+
+def _safe(**kw):
+    """A Safety that passes every rule, so one field at a time can be pushed to its threshold."""
+    d = dict(mint_authority_revoked=True, freeze_authority_revoked=True, lp_locked_pct=100.0,
+             top10_pct=20.0, dev_pct=0.0, dev_past_rugs=0, bundle_pct=0.0, holders=1500)
+    d.update(kw)
+    return Safety(**d)
+
+
+# (threshold, how to build the case, rule, which side kills, does the threshold value itself kill?)
+BOUNDARIES = [
+    ("FILTER_MIN_LIQUIDITY_USD", lambda v: market_rules(make_pair(liquidity_usd=v)), 3, "below", False),
+    ("FILTER_MIN_VOLUME_H1_USD", lambda v: market_rules(make_pair(volume_h1=v)), 4, "below", False),
+    ("FILTER_MAX_PRICE_CHANGE_H1_PCT", lambda v: market_rules(make_pair(price_change_h1=v)), 8, "above", True),
+    ("FILTER_MIN_LP_LOCKED_PCT", lambda v: safety_rules(_safe(lp_locked_pct=v)), 2, "below", False),
+    ("FILTER_MAX_TOP10_PCT", lambda v: safety_rules(_safe(top10_pct=v)), 5, "above", False),
+    ("FILTER_MAX_DEV_PCT", lambda v: safety_rules(_safe(dev_pct=v)), 6, "above", False),
+    ("FILTER_MAX_BUNDLE_PCT", lambda v: safety_rules(_safe(bundle_pct=v)), 7, "above", False),
+]
+
+
+@pytest.mark.parametrize("const,build,rule,kills_on,at_threshold_kills", BOUNDARIES)
+def test_every_rule_threshold_is_pinned(const, build, rule, kills_on, at_threshold_kills):
+    """Exactly ON each threshold, which way does the rule fall?
+
+    Seven numeric thresholds, and R8 is the only one where the threshold value itself kills:
+    "already up 80%+" is inclusive, while "liquidity under $40k" and the rest are not. That
+    asymmetry is correct and deliberate, and it is exactly the kind of thing a later tidy-up
+    flips to make the comparisons look consistent. Pin all seven, including the sign.
+    """
+    t = getattr(rules, const)
+    eps = t * 1e-6
+    at = [n for n, _ in build(t)]
+    assert (rule in at) is at_threshold_kills, f"{const}: exactly {t} should " \
+        f"{'kill' if at_threshold_kills else 'survive'}"
+    # one step the forbidden way always kills; one step the safe way never does
+    worse, better = (t + eps, t - eps) if kills_on == "above" else (t - eps, t + eps)
+    assert rule in [n for n, _ in build(worse)], f"{const}: {worse} should kill"
+    assert rule not in [n for n, _ in build(better)], f"{const}: {better} should survive"

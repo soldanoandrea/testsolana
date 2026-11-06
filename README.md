@@ -35,6 +35,13 @@ variables can't change them, so paper and live run on exactly the same rules.
 Rules 3, 4 and 8 are checked first because they need no extra API calls. When a coin fails several
 rules, the lowest-numbered one is recorded as the killer and the rest are listed in `detail`.
 
+**On the threshold itself.** R8 is the only rule where the threshold value kills: "already up
+80%+" is inclusive (`>= 80`), while "liquidity under $40k", "volume under $50k" and the three
+holder-concentration rules all let the exact figure through. That asymmetry follows the wording of
+the spec and is deliberate; `tests/test_filter.py` pins all seven numeric thresholds and the
+direction of each, because making the comparisons look consistent is a tempting tidy-up that would
+silently change which coins die.
+
 **Permanent vs benched.** Rules 1, 2, 5, 6 and 7 are facts about the token: revoked authorities, a
 locked LP, who holds the supply, who launched it. Those do not improve, so the coin is dead for good
 (`permanent: true` on the kill). Rules 3, 4 and 8 describe the hour: thin liquidity at midnight can
