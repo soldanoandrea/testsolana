@@ -177,7 +177,13 @@ for a different reason: it saturates at a ratio of 2.0 and never looks at the pr
 which is the component working, not a band in the wrong place.
 
 With the buyer side delivering ~28 of 35, a pass needs **83% of momentum + liquidity/mcap +
-holder growth**. Three coins is an anecdote, so nothing here has been reweighted — but on this
+holder growth** — and no single one of those three is worth enough to supply it. Each is capped at
+15 or 20 points, so from inside the near-miss band at least two of them have to move a long way at
+once. Worked through on `AMD` (oCZHH8, 55.9, needing +14.1): holder growth at its band top gives
+67.3, liquidity/mcap at its band top gives 67.4, and momentum maxes at 62.1 — each alone falls
+short. Momentum is also the one that improves by the pump *cooling* toward +50%/h, because the
+fade runs from there to the R8 kill line: a coin that keeps climbing dies at the Filter instead of
+scoring higher. Three coins is an anecdote, so nothing here has been reweighted — but on this
 evidence `unique_buyers`' upper bound and `buy_sell_ratio`'s price blindness are the specific
 things to look at, not the 70.
 
