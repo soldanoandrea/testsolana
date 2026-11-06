@@ -71,12 +71,23 @@ assert sum(ANALYST_WEIGHTS.values()) == 100
 # But the Analyst's look is expensive: an observation window of DESK_HOLDER_WINDOW_S plus RugCheck
 # and RPC on the re-check, where rules 3/4/8 cost no extra calls at all. Re-observing every reject
 # would starve the discovery of new coins. So the retry is much stricter than the Filter's bench:
-# only a near miss, only twice, and only after a full hour. With no smart_wallets list the passing
-# band is 70-85, so a near-miss band of 15 points is exactly as wide as the band it is trying for.
+# only a near miss, only twice, and the wait after the score itself is a full hour.
+#
+# Note what that does not say. `benched` is a single dict written by both mechanisms, and the last
+# write wins, so a near miss that comes back and is killed by a market rule has its hour replaced
+# by FILTER_BENCH_S and can reach the next expensive look half an hour later. Observed on AMD
+# (oCZHH8): scored 55.9 at 06:15, R8 at 07:15, next look due 07:45 rather than 08:15. The ceiling
+# is unaffected, because the budget is only spent when a score actually happens, so the expensive
+# looks stay capped at three and the coin still has to pass all eight rules to earn each one.
+#
+# With no smart_wallets list the passing band is 70-85, so a near-miss band of 15 points is
+# exactly as wide as the band it is trying for.
 ANALYST_RETRY_WITHIN = 15.0       # points below the threshold that still earn another look
 ANALYST_MAX_RETRIES = 2           # at most this many extra looks per coin, then dead for good
 ANALYST_RETRY_AFTER_S = 3600
-assert ANALYST_RETRY_AFTER_S > FILTER_BENCH_S     # the expensive look waits longer than the cheap one
+# Relates the two constants, which is all an assert here can do: the realized wait is whichever
+# mechanism wrote `benched` last, not the larger of the two. See the note above.
+assert ANALYST_RETRY_AFTER_S > FILTER_BENCH_S
 assert ANALYST_RETRY_WITHIN < ANALYST_MIN_SCORE
 
 # ---- EXECUTOR ------------------------------------------------------------
