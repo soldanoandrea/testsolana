@@ -9,7 +9,14 @@ from types import MappingProxyType
 # ---- SCOUT ---------------------------------------------------------------
 SCOUT_MIN_AGE_MIN = 30            # pair age lower bound (minutes)
 SCOUT_MAX_AGE_H = 72              # pair age upper bound (hours)
-SCOUT_MIN_MCAP_USD = 300_000
+# Lowered from 300_000 after sampling what sat underneath it. Of the tokens that failed the scope
+# test on this floor alone, the median mcap was ~6k -- dust -- and over 7 samples 36 minutes apart
+# only 2 distinct coins would have passed the Filter's own liquidity and volume floors, both just
+# under 300k with liquidity ~17% of mcap. Dropping to 250k picks those up for ~2.3 extra candidates
+# per scan; dropping further to 200k or 150k adds candidates and not one additional passer, which is
+# why this stops here. It widens what the Scout looks AT -- every kill rule and the score are
+# unchanged, so nothing that protects the balance moved.
+SCOUT_MIN_MCAP_USD = 250_000
 SCOUT_MAX_MCAP_USD = 20_000_000
 # DexScreener dexIds for Pump.fun (bonding curve + PumpSwap AMM) and Raydium
 SCOUT_DEX_IDS = frozenset({"pumpfun", "pumpswap", "raydium"})

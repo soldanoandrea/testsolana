@@ -15,7 +15,7 @@ variables can't change them, so paper and live run on exactly the same rules.
 
 | Agent | What it does | Data |
 |---|---|---|
-| **Scout** | Pump.fun (`pumpfun`, `pumpswap`) and Raydium pairs, 30 min–72 h old, mcap $300k–$20M. Each coin is passed to Filter once, plus once more each time a market rule benched it. | DexScreener (profiles, boosts, search) and GeckoTerminal (trending, per-DEX pools) for discovery. DexScreener for every metric. |
+| **Scout** | Pump.fun (`pumpfun`, `pumpswap`) and Raydium pairs, 30 min–72 h old, mcap $250k–$20M. Each coin is passed to Filter once, plus once more each time a market rule benched it. | DexScreener (profiles, boosts, search) and GeckoTerminal (trending, per-DEX pools) for discovery. DexScreener for every metric. |
 | **Filter** | 8 kill rules (below). One hit is final for this look. A safety rule (1, 2, 5, 6, 7) kills the coin **for good**; a market rule (3, 4, 8) **benches** it for 30 min and it gets another look. **Missing data also kills**: if a rule can't be verified, the coin fails it. | RugCheck report, cross-checked against Solana RPC `getAccountInfo` for the authorities |
 | **Analyst** | Watches holder count for `DESK_HOLDER_WINDOW_S` (300 s), sends the coin back through Filter on fresh data, then scores it 0–100. 70+ goes to Executor, under 70 dies — unless it is a **near miss**, which earns up to 2 more looks an hour apart (below). | DexScreener, GeckoTerminal (unique buyers/sellers in the last hour), RugCheck holders, RPC (smart wallets) |
 | **Executor** | 5% of the current balance per trade, **at most 6 positions open at once**. One entry per coin, ever. Never averages down. Asks Risk for the stop before it orders. Refuses every entry while the desk is halted. Writes the order to `state.json` **before** placing it, so a crash between a confirmed swap and the record cannot leave an unwatched bag in the wallet. | Paper fills or Jupiter swaps |
@@ -48,6 +48,24 @@ locked LP, who holds the supply, who launched it. Those do not improve, so the c
 be deep by 3 a.m., and a coin up 90% now is flat later. Those bench the coin for
 `rules.FILTER_BENCH_S` (30 min) and the Scout hands it over once more when the bench expires; the
 Filter then either benches it again or settles the matter.
+
+**Why the mcap floor sits at $250k.** It was $300k, and the floor was sampled before it moved.
+Of the tokens failing the scope test on that floor alone, the median mcap was ~$6k. Over 7 samples
+taken 6 minutes apart, only **2 distinct coins** would have cleared the Filter's own liquidity and
+volume floors — both just under $300k, both with liquidity ~17% of mcap — and lowering the floor to
+$200k or $150k added candidates without adding a single further passer:
+
+| Floor | Extra candidates / scan | Coins clearing R3+R4+R8 |
+|---|---|---|
+| $250k | 2.3 | 0.43 avg, 1 max, in 3 of 7 samples |
+| $200k | 3.4 | identical — same coins |
+| $150k | 5.9 | identical — same coins |
+
+So the floor stops at $250k: below it the cost grows and the catch does not. Against a measured
+10.3 new in-scope coins per hour, this is about **+32% of flow, not a doubling**. It widens what the
+Scout looks *at*; every kill rule and every score weight is unchanged, so nothing that protects the
+balance moved. It is not expected to produce trades on its own — with 6 scores and a 56.6 maximum
+against a threshold of 70, more flow buys more score attempts, not a pass.
 
 **What each scan actually spends itself on.** A mint only enters `seen` once it has been handed
 over, so one that is out of scope is asked about again on every scan, for as long as the feeds keep

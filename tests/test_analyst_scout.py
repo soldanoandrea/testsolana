@@ -25,7 +25,8 @@ def test_scout_scope():
     now = time.time() * 1000
     assert not in_scope(make_pair(created_at_ms=int(now - 29 * 60000)))
     assert not in_scope(make_pair(created_at_ms=int(now - 73 * 3600000)))
-    assert not in_scope(make_pair(market_cap=299_999))
+    assert in_scope(make_pair(market_cap=250_000))        # the floor itself is in scope
+    assert not in_scope(make_pair(market_cap=249_999))
     assert not in_scope(make_pair(market_cap=20_000_001))
     assert not in_scope(make_pair(dex_id="orca"))
 
@@ -168,7 +169,7 @@ def test_an_unknown_creation_time_is_never_cached_as_old():
 
 def test_a_small_mcap_is_asked_about_again():
     """The other half of what each scan wastes is mcap under 300k, which can grow into the band."""
-    s, dex = _scout_rows({"SMALL"}, [_row("SMALL", mcap=299_999)])
+    s, dex = _scout_rows({"SMALL"}, [_row("SMALL", mcap=249_999)])
     s.scan()
     s.scan()
     assert s.aged_out == set() and dex.asked == [{"SMALL"}, {"SMALL"}]
@@ -181,7 +182,7 @@ def test_one_old_pool_does_not_cache_a_token_that_also_has_a_fresh_one():
     first; it says nothing about the token.
     """
     rows = [_row("MIXED", age_h=73, pair="OLDPOOL"),
-            _row("MIXED", age_h=3, mcap=299_999, pair="NEWPOOL")]
+            _row("MIXED", age_h=3, mcap=249_999, pair="NEWPOOL")]
     s, dex = _scout_rows({"MIXED"}, rows)
     assert s.scan() == []                                # out of scope on mcap, not handed over
     assert s.aged_out == set()                           # but not written off either
