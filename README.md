@@ -182,8 +182,16 @@ holder growth** — and no single one of those three is worth enough to supply i
 once. Worked through on `AMD` (oCZHH8, 55.9, needing +14.1): holder growth at its band top gives
 67.3, liquidity/mcap at its band top gives 67.4, and momentum maxes at 62.1 — each alone falls
 short. Momentum is also the one that improves by the pump *cooling* toward +50%/h, because the
-fade runs from there to the R8 kill line: a coin that keeps climbing dies at the Filter instead of
-scoring higher. Three coins is an anecdote, so nothing here has been reweighted — but on this
+fade runs from there to the R8 kill line: a coin that keeps climbing dies instead of scoring
+higher.
+
+That fade opens a **dead zone between the retry floor and R8**. Momentum decays monotonically from
++50%/h to the +80% kill line, losing up to half its 20 points, so a coin sitting in the near-miss
+band can be pushed under the 55-point floor by the pump alone. For `AMD` at 55.9 the crossing is
+at **+71.48%/h**, 2.8 points above where it sat: from there to +80% it still passes all eight kill
+rules and is then buried by the Analyst for being too hot — permanent, budget half spent, and a
+different ending from R8 even though both are permanent. Worth separating, because in hindsight
+the two read as the same outcome. Three coins is an anecdote, so nothing here has been reweighted — but on this
 evidence `unique_buyers`' upper bound and `buy_sell_ratio`'s price blindness are the specific
 things to look at, not the 70.
 
