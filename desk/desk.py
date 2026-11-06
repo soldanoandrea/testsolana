@@ -96,13 +96,17 @@ class Desk:
         self.risk = Risk(self.log)
         self.executor = Executor(self.broker, self.risk, self.state, self.log)
         self.scout.seen |= self.state.dead | self.state.traded
-        # The Analyst's window lives in RAM only, so nothing is in flight at startup: a near-miss
-        # budget with no bench behind it belongs to a coin that crashed out of the pipeline, and
-        # would otherwise sit in state.json for ever. Restarts are the one moment this is knowable.
+        # The Analyst's window lives in RAM only, so a near-miss budget with no bench behind it
+        # belongs to a coin that was in flight when the desk went down. Dropping it would refund
+        # the attempts already spent, and `seen` is not persisted either, so the coin would come
+        # back for a full budget of looks. Put it back on the bench instead: the attempts stand,
+        # the cooldown applies as it would have, and if nothing comes back for it the Scout
+        # retires it and `_reconcile_retries` clears the budget through the usual path.
         for m in [m for m in self.state.analyst_retries if m not in self.state.benched]:
-            self.state.analyst_retries.pop(m, None)
-            self.log.log("retry_budget_dropped", mint=m,
-                         detail="near-miss budget with no bench after restart; coin left the pipeline")
+            self.state.benched[m] = time.time() + rules.ANALYST_RETRY_AFTER_S
+            self.log.log("retry_rebenched", mint=m, spent=self.state.analyst_retries[m],
+                         of=rules.ANALYST_MAX_RETRIES,
+                         detail="in flight at shutdown; bench restored so the attempts still count")
         # An order may have gone out without its position reaching the file. Settle that first:
         # until it is settled there could be a bag in the wallet with no stop watching it.
         self.executor.reconcile_pending()

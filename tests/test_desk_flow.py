@@ -516,12 +516,12 @@ def test_a_kill_on_the_way_back_hands_the_budget_back_too(tmp_path, monkeypatch)
         FAKE_MARKET.reset()
 
 
-def test_a_restart_drops_a_budget_with_no_bench_behind_it(tmp_path, monkeypatch):
-    """The residual case: the coin crashed out of the pipeline while the desk was down.
+def test_a_restart_puts_an_in_flight_near_miss_back_on_the_bench(tmp_path, monkeypatch):
+    """A budget with no bench is a coin that was in flight when the desk went down.
 
-    A benched coin keeps its budget across the restart -- that is the whole point of persisting
-    it. One with no bench cannot be in flight, because the Analyst's window is never written to
-    disk, so it is an orphan and the restart is where that becomes knowable.
+    Dropping it would refund the attempts already spent, and `seen` is not persisted either, so
+    the coin comes back and would buy a whole fresh budget. Re-benching keeps the attempts and
+    applies the cooldown it would have served anyway.
     """
     monkeypatch.setattr(deskmod, "Sources", FakeSources)
     FAKE_MARKET.reset()
@@ -529,15 +529,45 @@ def test_a_restart_drops_a_budget_with_no_bench_behind_it(tmp_path, monkeypatch)
     d = deskmod.Desk(cfg)
     d.log.echo = False
     try:
-        d.state.analyst_retries.update({"ORPHAN": 1, "ONBENCH": 1})
+        d.state.analyst_retries.update({"INFLIGHT": 1, "ONBENCH": 2})
         d.state.benched["ONBENCH"] = time.time() + 3600
         d._save()
 
         back = deskmod.Desk(cfg)                            # restart
         back.log.echo = False
-        assert back.state.analyst_retries == {"ONBENCH": 1}
-        assert [e["mint"] for e in back.log.events()
-                if e["event"] == "retry_budget_dropped"] == ["ORPHAN"]
+        assert back.state.analyst_retries == {"INFLIGHT": 1, "ONBENCH": 2}   # nothing refunded
+        assert "INFLIGHT" in back.state.benched                              # and it can return
+        assert back.state.benched["INFLIGHT"] > time.time() + 60             # after the cooldown
+        r = [e for e in back.log.events() if e["event"] == "retry_rebenched"]
+        assert [e["mint"] for e in r] == ["INFLIGHT"] and r[0]["spent"] == 1
+        assert back.state.benched["ONBENCH"] == d.state.benched["ONBENCH"]   # left as it was
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_a_rebenched_budget_is_cleared_if_the_coin_never_comes_back(tmp_path, monkeypatch):
+    """The re-bench must not become the new way a budget lives for ever.
+
+    It converges through the path the Scout already has: bench expires, nothing in scope comes
+    back, the coin is retired and the sweep clears the budget.
+    """
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    cfg = dataclasses.replace(Config(), data_dir=tmp_path)
+    d = deskmod.Desk(cfg)
+    d.log.echo = False
+    try:
+        d.state.analyst_retries["GONE"] = 1
+        d._save()
+        back = deskmod.Desk(cfg)
+        back.log.echo = False
+        assert "GONE" in back.state.benched
+
+        FAKE_MARKET.vanish = True                           # nothing comes back for it
+        back.state.benched["GONE"] = time.time() - 1
+        back.pipeline_tick()
+        assert [e["mint"] for e in expired(back)] == ["GONE"]
+        assert not back.state.analyst_retries
     finally:
         FAKE_MARKET.reset()
 

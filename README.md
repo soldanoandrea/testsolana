@@ -96,9 +96,17 @@ near miss look like it had simply evaporated halfway through its budget. The Sco
 the desk hands the retry budget back, since a coin that cannot reach the Analyst has no use for
 one. The same sweep covers the other ways a returning coin stops being eligible: the Filter
 burying it on the re-check, or its pair vanishing. A coin still in flight keeps its budget, or a
-near miss would buy a fresh look every tick. At startup the rule is simpler still: the Analyst's
-window is never persisted, so a budget with no bench behind it is an orphan and is dropped
-(`retry_budget_dropped`).
+near miss would buy a fresh look every tick.
+
+A restart is the one case where "in flight" cannot be read off the disk, because neither the
+Analyst's window nor the Scout's `seen` set is persisted. A budget with no bench behind it is
+therefore a coin that was mid-pipeline when the desk went down — and since `seen` is gone too, it
+will be discovered again. Dropping the budget there would refund the attempts it had already
+spent and hand it a whole fresh one, so the desk re-benches it instead (`retry_rebenched`): the
+attempts stand, the hour's cooldown applies as it would have, and the coin returns through
+Scout → Filter like any other. If nothing in scope comes back for it, the Scout retires it and the
+sweep above clears the budget — so the re-bench converges rather than becoming a new way for an
+entry to live for ever.
 
 Observed case: `COGE` scored **57.9** (momentum 13.3/20, buyers 15/15, buy/sell 13.8/20, holder
 growth 15/15, liquidity/mcap **0.7**/15, smart wallets 0/15) and was buried for good. An hour later
