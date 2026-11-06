@@ -135,8 +135,33 @@ exit, not the return, and it was issuing a permanent verdict on an hourly number
 ### Score weights
 momentum 20 · unique buyers 15 · buy/sell ratio 20 · holder growth 15 · liquidity/mcap 15 · smart wallets 15.
 See `score_components()` in [`desk/agents/analyst.py`](desk/agents/analyst.py) for the curves. A
-component with no data scores 0, so the desk never guesses a score upward. **With no
-`smart_wallets.txt` the maximum score is 85**, so a coin needs 70 of the remaining 85 points.
+component with no data scores 0, so the desk never guesses a score upward.
+
+**The maximum is 85 today, not 100.** `smart_wallets.txt` exists in the repo but holds only the
+format notes — ten comment lines, no addresses — so `smart_wallets()` yields an empty list and
+that component scores 0 on every coin. Checking that the file exists is not enough; it has to
+contain addresses you have actually verified. So the threshold is 70 of an effective **85 (82% of
+the points that exist)**, and the `start` event logs `smart_wallets` so the live count is on the
+record.
+
+**Both buyer-side bands are calibrated away from the coins that reach the Analyst.** Measured over
+the three scores of the first paper night:
+
+| component | scored | band | observed inputs |
+|---|---|---|---|
+| `unique_buyers` | 80% of max | 50 → 400 buyers | **185, 1751, 3182** |
+| `buy_sell_ratio` | 82% of max | 1.0 → 2.0 | 1.47, 2.89, 3.52 |
+| `momentum` | 26% | — | −7.4%, −10.1%, +60.4% |
+| `liquidity_to_mcap` | 13% | 0.05 → 0.20 | **0.039, 0.051, 0.057** |
+| `holder_growth` | 8% | 0 → 20%/h | 0, 0, 4.7%/h |
+
+A coin only reaches the Analyst by clearing R4 ($50k hourly volume), and at that volume the buyer
+count is in the hundreds to thousands — an order of magnitude past where `unique_buyers` tops out.
+`liquidity_to_mcap` has the opposite problem: its band *starts* at 0.05 and every coin observed so
+far sat at or below that, so it pays nothing. The two ends of the score are therefore measuring
+much less than their 35 and 15 weights suggest, and with the buyer side delivering ~28 of 35 a
+pass needs **83% of momentum + liquidity/mcap + holder growth**. Three coins is an anecdote, so
+nothing here has been reweighted — but the bands, not the 70, are where the evidence points.
 
 **The buy/sell ratio counts heads, not size, and does not look at the price.** It is unique buyers
 over unique sellers in the last hour, and `lin(x, 1.0, 2.0)` saturates at 2.0 — so many small
