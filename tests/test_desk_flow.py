@@ -245,6 +245,32 @@ def test_a_market_rule_benches_the_coin_and_it_comes_back(tmp_path, monkeypatch)
         FAKE_MARKET.reset()
 
 
+def test_the_recap_separates_distinct_coins_from_hand_offs(tmp_path, monkeypatch):
+    """One coin benched and looked at twice is 1 coin and 2 hand-offs, and the recap must say so.
+
+    The line read "Scanned (pairs handed to Filter)" while counting distinct mints, which was the
+    same number before the bench existed. On the first paper night it reported 30 against 178
+    actual hand-offs, right above a kill count that measures verdicts -- two quantities of
+    different kinds side by side with nothing saying which was which.
+    """
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    FAKE_MARKET.liquidity = 10_000                      # under R3: benched, not buried
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    try:
+        d.pipeline_tick()
+        d.state.benched["GOODMINT"] = time.time() - 1
+        d.pipeline_tick()                               # same coin, second look
+
+        assert len(scouted(d)) == 2                     # two hand-offs
+        recap = d.write_recap(since=0)
+        assert "**1** distinct, handed to Filter **2** times" in recap, recap
+        assert "**2** verdicts on **1** coins" in recap, recap
+    finally:
+        FAKE_MARKET.reset()
+
+
 def test_a_safety_kill_is_never_retried(tmp_path, monkeypatch):
     monkeypatch.setattr(deskmod, "Sources", FakeSources)
     FAKE_MARKET.reset()

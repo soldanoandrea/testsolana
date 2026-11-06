@@ -53,7 +53,12 @@ class Logger:
     def recap(self, since: float, balance_now: float, start_balance: float, open_positions: list[dict],
               stopped: bool = False) -> str:
         ev = self.events(since)
-        scanned = {e["mint"] for e in ev if e["event"] == "scouted"}
+        # Distinct coins and hand-offs are different numbers now that a benched coin comes back,
+        # and the recap used to print the first under a label that promised the second. Every
+        # count below says which of the two it is, because they sit next to each other.
+        handoffs = [e for e in ev if e["event"] == "scouted"]
+        scanned = {e["mint"] for e in handoffs}
+        killed_coins = {e["mint"] for e in ev if e["event"] == "kill"}
         kills = Counter(e["rule_name"] for e in ev if e["event"] == "kill")
         low_scores = [e for e in ev if e["event"] == "score" and not e.get("passed")]
         opens = [e for e in ev if e["event"] == "trade_open"]
@@ -71,12 +76,15 @@ class Logger:
 
         L = [f"# Morning recap — {datetime.now():%Y-%m-%d %H:%M}",
              f"Window: {datetime.fromtimestamp(since):%Y-%m-%d %H:%M} → now", "",
-             f"- Scanned (pairs handed to Filter): **{len(scanned)}**",
-             f"- Killed by Filter: **{sum(kills.values())}**"]
+             f"- Coins seen: **{len(scanned)}** distinct, handed to Filter "
+             f"**{len(handoffs)}** times (a benched coin comes back for another look)",
+             f"- Filter kills: **{sum(kills.values())}** verdicts on "
+             f"**{len(killed_coins)}** coins"]
         for n, name in rules.RULE_NAMES.items():
             L.append(f"  - Rule {n} `{name}`: {kills.get(name, 0)}")
-        L += [f"- Scored under {rules.ANALYST_MIN_SCORE} (Analyst kill): **{len(low_scores)}**"
-              + (f", of which {len(a_bench)} benched for another look" if a_bench else ""),
+        L += [f"- Scored under {rules.ANALYST_MIN_SCORE}: **{len(low_scores)}** scores on "
+              f"**{len({e['mint'] for e in low_scores})}** coins"
+              + (f", {len(a_bench)} of them benched for another look" if a_bench else ""),
               f"- Trades opened: **{len(opens)}**, closed: **{len(closes)}**, still open: **{len(open_positions)}**",
               f"- W/L: **{len(wins)}/{len(losses)}**"]
         if closes:
