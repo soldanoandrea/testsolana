@@ -287,6 +287,33 @@ wider slippage (6%, then 12%, then 24%, capped there) so exits get out, and the 
 on the position so the next tick carries on widening instead of restarting at 3%. Use a private RPC
 (`SOLANA_RPC_URL`, e.g. Helius) because the public one rate-limits.
 
+### Open question: is the near-miss bench worth its cost?
+
+The retry added in `d63da24` has now run four times, and three of the four scores came back worse.
+Every near miss of the first day of paper:
+
+| Coin | Benched at | Retry | Change |
+|---|---|---|---|
+| `AMD` | 55.9 @ 06:15 | 36.5 @ 07:51 | **−19.4** |
+| `APPLEPAID` | 61.2 @ 15:26 | 46.7 @ 16:33 | **−14.5** |
+| `401kinu` | 55.1 @ 18:16 | 57.2 @ 19:23 | +2.1 |
+| `401kinu` | 57.2 @ 19:23 | 27.9 @ 20:30 | **−29.3** |
+
+Mean change **−15.3 points**, and none of the four reached 70. Four retries is not evidence, but it
+has a plausible mechanism behind it: `ANALYST_RETRY_AFTER_S` is an hour, and a coin that was worth a
+near miss is typically an hour into a move. An hour later it is past the peak more often than it is
+consolidating — every one of these was benched with a 1 h change between +55% and +79%, and
+`momentum` was the component that collapsed in all three losing cases, twice to exactly 0.
+
+If that holds, the retry's expected value is **negative**: it spends up to two further 300 s
+observation windows plus RugCheck and the RPC to look at coins that are, on average, 15 points worse
+than when they were set aside. The counter-argument is `401kinu`'s +2.1 and the fact that none of
+these entered, so the budget never cost a bad trade — only the calls.
+
+What would settle it: twenty-odd retries, and whether any retry has ever crossed 70. Until then the
+wait is left at an hour, because shortening it to catch the coin mid-move argues for the opposite of
+what `FILTER_BENCH_S` argues, and both cannot be tuned on four observations.
+
 ### The first trade the desk nearly took: APPLEPAID, 2026-11-06
 
 `APPLEPAID` (`APgbBfggjo79T7PdVqTQcEbVdQWBCif1kLTwjRwrxc8Z`) scored **61.2** at 15:26 — the highest
