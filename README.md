@@ -29,7 +29,7 @@ variables can't change them, so paper and live run on exactly the same rules.
 4. 1h volume under $50k.
 5. Top 10 holders own more than 25%. Pool vaults and lockers are excluded, since they aren't holders.
 6. Dev wallet holds more than 3%, or one of the dev's last 5 launches is flagged `rugged` by RugCheck. An unknown dev also dies.
-7. Bundled share over 10%: the most RugCheck shows either in its linked insider networks (wallets funded together or buying in bundles) or in the top holders it flags as insiders.
+7. Bundled share over 10%: the most RugCheck shows either in its linked insider networks (wallets funded together or buying in bundles) or in the top holders it flags as insiders. The figure is a **lower bound**: RugCheck gives each insider network's holdings but not its wallet list, so a wallet in two networks is counted twice and the sum can exceed the supply (`MNST`, 2026-11-06, logged 216.8%). It cannot be deduplicated from this data, so it is reported as `>=X%` and said to be a sum. The verdict is unaffected — anything over 10% kills either way.
 8. Price already up 80% or more in the last hour.
 
 Rules 3, 4 and 8 are checked first because they need no extra API calls. When a coin fails several

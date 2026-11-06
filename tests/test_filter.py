@@ -164,6 +164,21 @@ def test_rule7_insider_networks(log):
     assert run(log, report=make_report(insiderNetworks=nets, graphInsidersDetected=5)).alive
 
 
+def test_rule7_summed_networks_are_reported_as_a_lower_bound(log):
+    """RugCheck gives each network's holdings but not its wallets, so overlaps are counted twice.
+
+    MNST logged "bundled/insider wallets hold 216.8%" on 2026-11-06 — a share of supply that cannot
+    exist. The sum cannot be deduplicated from this data, so it is reported as a lower bound and
+    said to be a sum, rather than printed as if it were a share.
+    """
+    supply = 1_000_000_000_000
+    nets = [{"currentHolding": supply * 1.2}, {"currentHolding": supply * 0.968}]  # sums to 216.8%
+    v = run(log, report=make_report(insiderNetworks=nets, graphInsidersDetected=2000))
+    assert v.rule == 7                                   # the verdict is unaffected
+    assert ">=216.8%" in v.detail
+    assert "wallets may overlap" in v.detail
+
+
 def test_rule7_insiders_without_sizes_is_dead(log):
     assert run(log, report=make_report(insiderNetworks=None, graphInsidersDetected=30)).rule == 7
 

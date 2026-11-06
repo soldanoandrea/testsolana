@@ -70,6 +70,9 @@ class Safety:
     dev_pct: Optional[float] = None
     dev_past_rugs: Optional[int] = None
     bundle_pct: Optional[float] = None
+    # True when bundle_pct came from summing insider networks, which may double-count a wallet in
+    # more than one network: then it is a lower bound, not a share of supply.
+    bundle_pct_is_sum: bool = False
     holders: Optional[int] = None
     notes: list = field(default_factory=list)
 

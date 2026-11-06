@@ -65,9 +65,15 @@ def build_safety(pair: Pair, report: dict, rpc_mint: dict | None, rugged_lookup)
     supply = float(tok.get("supply") or 0)
     nets = report.get("insiderNetworks")
     if nets and supply:
+        # RugCheck gives each network's holdings but not its wallet list, so a wallet in two
+        # networks is counted twice and this sum can exceed the supply -- MNST logged 216.8% on
+        # 2026-11-06. It cannot be deduplicated from this data, so it is a LOWER BOUND on the
+        # bundled share, not a share of supply, and it is named that way wherever it is reported.
+        # The verdict is unaffected: anything over FILTER_MAX_BUNDLE_PCT kills either way.
         net_pct = sum(float(n.get("currentHolding") or 0) for n in nets) / supply * 100
         s.bundle_pct = max(s.bundle_pct or 0.0, net_pct)
-        s.notes.append(f"insider networks: {len(nets)} holding {net_pct:.1f}%")
+        s.bundle_pct_is_sum = net_pct >= s.bundle_pct
+        s.notes.append(f"insider networks: {len(nets)} summing to {net_pct:.1f}% (wallets may overlap)")
     elif report.get("graphInsidersDetected") and not nets:
         s.bundle_pct = None   # insiders detected but sizes missing -> can't verify -> Filter kills
         s.notes.append("insiders detected without network sizes")
@@ -119,7 +125,8 @@ def safety_rules(s: Safety) -> list[tuple[int, str]]:
     if s.bundle_pct is None:
         hits.append((7, "bundle share unverifiable"))
     elif s.bundle_pct > R.FILTER_MAX_BUNDLE_PCT:
-        hits.append((7, f"bundled/insider wallets hold {s.bundle_pct:.1f}% > {R.FILTER_MAX_BUNDLE_PCT:.0f}%"))
+        qual = " (summed over networks, wallets may overlap)" if getattr(s, "bundle_pct_is_sum", False) else ""
+        hits.append((7, f"bundled/insider wallets hold >={s.bundle_pct:.1f}%{qual} > {R.FILTER_MAX_BUNDLE_PCT:.0f}%"))
     return hits
 
 
