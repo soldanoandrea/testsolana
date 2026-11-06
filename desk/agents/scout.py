@@ -24,6 +24,7 @@ class Scout:
         self.log = logger
         self.seen: set[str] = set()          # mints already passed to Filter
         self.benched: dict[str, float] = {}  # shared with Filter: mint -> earliest retry
+        self.retired: set[str] = set()       # benches that expired with no pair; drained by the desk
 
     def scan(self) -> list[Pair]:
         mints = set()
@@ -58,9 +59,16 @@ class Scout:
 
         # The bench is spent now that we have fresh data for it. Only a fresh bench from the
         # Filter brings the coin back, so a coin that has aged out of scope stops costing calls.
-        for m in due:
+        for m in sorted(due):
             self.benched.pop(m, None)
             self.seen.add(m)
+            if m not in best:
+                # Nothing came back for it: no pair, or no longer in scope. It is now in `seen`
+                # with no bench, so nothing will ever hand it over again -- this line is the only
+                # record of how that coin ended. Say so, and let the desk retire what it was owed.
+                self.retired.add(m)
+                self.log.log("bench_expired", mint=m,
+                             detail="bench spent, no in-scope pair came back; retired unseen")
         out = list(best.values())
         for p in out:
             self.seen.add(p.mint)

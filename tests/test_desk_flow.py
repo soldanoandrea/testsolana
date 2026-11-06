@@ -31,6 +31,7 @@ class Market:
         self.liquidity = 220_000
         self.chg_h1 = 30
         self.dex_down = self.jup_down = False
+        self.vanish = False          # the pair stops being returned at all (delisted, or out of scope)
 
 
 class FakeSources:
@@ -39,7 +40,10 @@ class FakeSources:
 
         class Dex:
             def discover_mints(self): return {"GOODMINT"}
-            def pairs_for_mints(self, mints): return [ds_pair("GOODMINT", m.price)] if "GOODMINT" in mints else []
+            def pairs_for_mints(self, mints):
+                if m.vanish or "GOODMINT" not in mints:
+                    return []
+                return [ds_pair("GOODMINT", m.price)]
             def prices(self, mints):
                 if m.dex_down:
                     raise DataUnavailable("dexscreener down")
@@ -408,6 +412,132 @@ def test_a_benched_near_miss_must_pass_the_filter_again(tmp_path, monkeypatch):
         d.pipeline_tick()
         assert "GOODMINT" not in d.analyst.watching         # killed by the Filter, not re-observed
         assert [e for e in d.log.events() if e["event"] == "kill" and e["rule"] == 3]
+    finally:
+        FAKE_MARKET.reset()
+
+
+def expired(d):
+    return [e for e in d.log.events() if e["event"] == "bench_expired"]
+
+
+def test_a_bench_that_expires_with_nothing_coming_back_names_the_coin(tmp_path, monkeypatch):
+    """A coin can end by simply not coming back. That ending has to be readable in the log.
+
+    Before this, the only trace was the gap between retried_from_bench and handed_to_filter in the
+    scan event, which names no mint: from the log the coin had just vanished.
+    """
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    FAKE_MARKET.liquidity = 10_000                          # under R3 -> benched by the Filter
+    d = deskmod.Desk(dataclasses.replace(Config(), data_dir=tmp_path))
+    d.log.echo = False
+    try:
+        d.pipeline_tick()
+        assert "GOODMINT" in d.state.benched and not expired(d)
+
+        FAKE_MARKET.vanish = True                           # delisted while it sat on the bench
+        d.state.benched["GOODMINT"] = time.time() - 1
+        d.pipeline_tick()
+        assert [e["mint"] for e in expired(d)] == ["GOODMINT"]
+        assert "GOODMINT" not in d.state.benched            # the bench is spent either way
+
+        FAKE_MARKET.vanish = False                          # and it is not handed over again
+        d.pipeline_tick()
+        assert len(scouted(d)) == 1 and len(expired(d)) == 1
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_a_near_miss_that_never_comes_back_hands_its_budget_back(tmp_path, monkeypatch):
+    """The real case: attempt 1 spent, bench expired with no pair, entry left in state for ever."""
+    d = near_miss_desk(tmp_path, monkeypatch)
+    try:
+        one_look(d, first=True)
+        assert d.state.analyst_retries["GOODMINT"] == 1
+
+        FAKE_MARKET.vanish = True
+        d.state.benched["GOODMINT"] = time.time() - 1
+        d.pipeline_tick()
+
+        assert expired(d) and expired(d)[0]["mint"] == "GOODMINT"
+        assert not d.state.analyst_retries                  # no entry outliving the coin
+        assert not json.loads(                              # and gone from the file, not just RAM
+            d.cfg.path("state.json").read_text())["analyst_retries"]
+        assert "near miss whose second look never happened" in d.write_recap(since=0)
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_a_near_miss_still_in_flight_keeps_its_budget(tmp_path, monkeypatch):
+    """The guard on the fix above: the sweep must not refund a coin that DID come back.
+
+    Scout drops the bench the moment it hands the pair over, so between that hand-off and the
+    Analyst's verdict the budget is the only record that an attempt was already spent. Clear it
+    there and a near miss would buy unlimited looks, one per tick.
+    """
+    d = near_miss_desk(tmp_path, monkeypatch)
+    try:
+        one_look(d, first=True)
+        assert d.state.analyst_retries["GOODMINT"] == 1
+
+        d.state.benched["GOODMINT"] = time.time() - 1
+        d.pipeline_tick()                                   # handed over, observed, no verdict yet
+        assert "GOODMINT" in d.analyst.watching
+        assert "GOODMINT" not in d.state.benched            # bench already spent
+        assert d.state.analyst_retries["GOODMINT"] == 1     # ...and the attempt still counts
+        assert not expired(d)
+
+        FAKE_MARKET.holders += 200                          # let the window finish: still a miss
+        d.analyst.watching["GOODMINT"].t0 -= 600
+        d.pipeline_tick()
+        assert d.state.analyst_retries["GOODMINT"] == 2
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_a_kill_on_the_way_back_hands_the_budget_back_too(tmp_path, monkeypatch):
+    """The Filter burying a returning near miss is the other way the budget was orphaned."""
+    d = near_miss_desk(tmp_path, monkeypatch)
+    try:
+        one_look(d, first=True)
+        assert d.state.analyst_retries["GOODMINT"] == 1
+
+        d.filter.src = type("S", (), {                      # 15 whales -> R5, permanent
+            "rug": type("R", (), {"report": staticmethod(lambda m: make_report(
+                topHolders=[{"owner": f"W{i}", "address": f"A{i}", "pct": 3.0} for i in range(15)])),
+                "was_rugged": staticmethod(lambda m: False)})(),
+            "rpc": d.src.rpc})()
+        d.state.benched["GOODMINT"] = time.time() - 1
+        d.pipeline_tick()
+
+        assert "GOODMINT" in d.state.dead
+        assert not d.state.analyst_retries
+    finally:
+        FAKE_MARKET.reset()
+
+
+def test_a_restart_drops_a_budget_with_no_bench_behind_it(tmp_path, monkeypatch):
+    """The residual case: the coin crashed out of the pipeline while the desk was down.
+
+    A benched coin keeps its budget across the restart -- that is the whole point of persisting
+    it. One with no bench cannot be in flight, because the Analyst's window is never written to
+    disk, so it is an orphan and the restart is where that becomes knowable.
+    """
+    monkeypatch.setattr(deskmod, "Sources", FakeSources)
+    FAKE_MARKET.reset()
+    cfg = dataclasses.replace(Config(), data_dir=tmp_path)
+    d = deskmod.Desk(cfg)
+    d.log.echo = False
+    try:
+        d.state.analyst_retries.update({"ORPHAN": 1, "ONBENCH": 1})
+        d.state.benched["ONBENCH"] = time.time() + 3600
+        d._save()
+
+        back = deskmod.Desk(cfg)                            # restart
+        back.log.echo = False
+        assert back.state.analyst_retries == {"ONBENCH": 1}
+        assert [e["mint"] for e in back.log.events()
+                if e["event"] == "retry_budget_dropped"] == ["ORPHAN"]
     finally:
         FAKE_MARKET.reset()
 

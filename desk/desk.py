@@ -96,6 +96,13 @@ class Desk:
         self.risk = Risk(self.log)
         self.executor = Executor(self.broker, self.risk, self.state, self.log)
         self.scout.seen |= self.state.dead | self.state.traded
+        # The Analyst's window lives in RAM only, so nothing is in flight at startup: a near-miss
+        # budget with no bench behind it belongs to a coin that crashed out of the pipeline, and
+        # would otherwise sit in state.json for ever. Restarts are the one moment this is knowable.
+        for m in [m for m in self.state.analyst_retries if m not in self.state.benched]:
+            self.state.analyst_retries.pop(m, None)
+            self.log.log("retry_budget_dropped", mint=m,
+                         detail="near-miss budget with no bench after restart; coin left the pipeline")
         # An order may have gone out without its position reaching the file. Settle that first:
         # until it is settled there could be a bag in the wallet with no stop watching it.
         self.executor.reconcile_pending()
@@ -129,7 +136,24 @@ class Desk:
             # Deliberately not under the desk lock: a live buy can take minutes to confirm, and
             # the stop monitor has to keep running meanwhile. State serialises its own writes.
             self.executor.enter(s)
+        self._reconcile_retries()
         self._save()
+
+    def _reconcile_retries(self) -> None:
+        """A near-miss budget is only worth keeping while the coin can still reach the Analyst.
+
+        It loses that chance in several places -- the Filter buries it on the way back, its pair
+        vanishes, or Scout spends the bench and no in-scope pair comes back -- and an entry left
+        behind here survives every restart. Hence one sweep instead of a pop at each of those
+        sites, which is the bookkeeping that goes stale the next time such a site is added.
+
+        A coin still in flight (handed over this tick, or sitting in the Analyst's window) is in
+        none of these sets, so its budget is left alone and the second look still counts.
+        """
+        for m in list(self.state.analyst_retries):
+            if m in self.state.dead or m in self.scout.retired:
+                self.state.analyst_retries.pop(m, None)
+        self.scout.retired.clear()
 
     def _after_low_score(self, pair: Pair, s) -> None:
         """Under 70 dies — but a near miss on the hour's numbers gets a second look, not a grave.

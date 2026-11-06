@@ -65,6 +65,7 @@ class Logger:
         blind = [e for e in ev if e["event"] == "unprotected" and e.get("agent") == "risk"]
         recovered = [e for e in ev if e["event"] == "recovered"]
         a_bench = [e for e in ev if e["event"] == "analyst_bench"]
+        expired = [e for e in ev if e["event"] == "bench_expired"]
         fallbacks = [e for e in ev if e["event"] == "price_fallback"]
         errors = [e for e in ev if e["event"] == "error"]
 
@@ -91,6 +92,15 @@ class Logger:
                      f"-> ${h.get('equity'):,.2f} ({h.get('drawdown_pct'):+.2f}%)")
         for r in recovered:
             L.append(f"- **Recovered entry** {r.get('symbol')}: held {r.get('held')} - {r.get('detail')}")
+        if expired:
+            # A coin can also end by simply not coming back, and that ending left no trace until
+            # the Scout started naming it. Worth separating: a near miss retired this way spent an
+            # attempt without ever producing the second verdict it was given the attempt for.
+            near = {e["mint"] for e in a_bench} & {e["mint"] for e in expired}
+            L.append(f"- Benched coins retired unseen (bench expired, no in-scope pair came back): "
+                     f"**{len(expired)}**"
+                     + (f", of which {len(near)} a near miss whose second look never happened"
+                        if near else ""))
         if fallbacks:
             L.append(f"- Price fallback used (DexScreener missed, Jupiter answered): {len(fallbacks)} tick(s)")
         if blind:

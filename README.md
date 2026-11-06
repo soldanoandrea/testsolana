@@ -87,6 +87,19 @@ observation window plus RugCheck and RPC on the re-check. Re-observing every rej
 the discovery of new coins. A benched coin always returns through **Scout → Filter**, so all 8 kill
 rules are replayed on fresh data — it can never come back straight to the Analyst.
 
+**How a benched coin can end without a verdict.** The bench is spent the moment the Scout has
+fresh data for it, so a coin that no longer has an in-scope pair leaves the pipeline right there:
+it is never handed over again, and no agent ever rules on it. That is the intended behaviour — it
+stops a delisted coin costing calls for ever — but it used to happen silently, which made a
+near miss look like it had simply evaporated halfway through its budget. The Scout now logs
+`bench_expired` naming the mint, the recap counts them (and says how many were near misses), and
+the desk hands the retry budget back, since a coin that cannot reach the Analyst has no use for
+one. The same sweep covers the other ways a returning coin stops being eligible: the Filter
+burying it on the re-check, or its pair vanishing. A coin still in flight keeps its budget, or a
+near miss would buy a fresh look every tick. At startup the rule is simpler still: the Analyst's
+window is never persisted, so a budget with no bench behind it is an orphan and is dropped
+(`retry_budget_dropped`).
+
 Observed case: `COGE` scored **57.9** (momentum 13.3/20, buyers 15/15, buy/sell 13.8/20, holder
 growth 15/15, liquidity/mcap **0.7**/15, smart wallets 0/15) and was buried for good. An hour later
 it was **+39%**, with liquidity/mcap still 0.051 against the 0.057 it was marked down for. One coin
