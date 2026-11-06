@@ -138,6 +138,16 @@ See `score_components()` in [`desk/agents/analyst.py`](desk/agents/analyst.py) f
 component with no data scores 0, so the desk never guesses a score upward. **With no
 `smart_wallets.txt` the maximum score is 85**, so a coin needs 70 of the remaining 85 points.
 
+**The buy/sell ratio counts heads, not size, and does not look at the price.** It is unique buyers
+over unique sellers in the last hour, and `lin(x, 1.0, 2.0)` saturates at 2.0 — so many small
+buyers absorbing a few large sells reads as maximally bullish. Observed: `RAMBO` scored the full
+20/20 there (185 buyers, ratio 2.89) during an hour in which the price fell **10%**, which is the
+signature of distribution rather than accumulation. The total came out right anyway, 29.3, because
+momentum and liquidity/mcap both scored 0 on the same data — two components caught what this one
+missed. That is redundancy doing the work, not this curve being correct, and it is worth knowing
+before anyone reweights the six. No kill rule catches a falling price either: R8 catches a pump,
+and a dump is meant to be priced by `momentum`, which is what happened here.
+
 ## Running
 
 ```bash
