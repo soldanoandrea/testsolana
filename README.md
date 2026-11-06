@@ -144,24 +144,32 @@ contain addresses you have actually verified. So the threshold is 70 of an effec
 the points that exist)**, and the `start` event logs `smart_wallets` so the live count is on the
 record.
 
-**Both buyer-side bands are calibrated away from the coins that reach the Analyst.** Measured over
-the three scores of the first paper night:
+**`unique_buyers` is calibrated away from the coins that reach the Analyst.** Measured over the
+three scores of the first paper night:
 
 | component | scored | band | observed inputs |
 |---|---|---|---|
 | `unique_buyers` | 80% of max | 50 → 400 buyers | **185, 1751, 3182** |
 | `buy_sell_ratio` | 82% of max | 1.0 → 2.0 | 1.47, 2.89, 3.52 |
 | `momentum` | 26% | — | −7.4%, −10.1%, +60.4% |
-| `liquidity_to_mcap` | 13% | 0.05 → 0.20 | **0.039, 0.051, 0.057** |
+| `liquidity_to_mcap` | 13% | 0.05 → 0.20 | 0.039, 0.051, **0.108** |
 | `holder_growth` | 8% | 0 → 20%/h | 0, 0, 4.7%/h |
 
 A coin only reaches the Analyst by clearing R4 ($50k hourly volume), and at that volume the buyer
-count is in the hundreds to thousands — an order of magnitude past where `unique_buyers` tops out.
-`liquidity_to_mcap` has the opposite problem: its band *starts* at 0.05 and every coin observed so
-far sat at or below that, so it pays nothing. The two ends of the score are therefore measuring
-much less than their 35 and 15 weights suggest, and with the buyer side delivering ~28 of 35 a
-pass needs **83% of momentum + liquidity/mcap + holder growth**. Three coins is an anecdote, so
-nothing here has been reweighted — but the bands, not the 70, are where the evidence points.
+count is in the hundreds to thousands — 4 to 8 times past where `unique_buyers` tops out, so it
+saturates for structural reasons rather than because the coin is good. `buy_sell_ratio` is weak
+for a different reason: it saturates at a ratio of 2.0 and never looks at the price, so it paid
+20/20 on an hour in which `RAMBO` fell 10%. `unique_buyers` itself is not a constant — 15.0, 15.0,
+5.8 — and does discriminate.
+
+`liquidity_to_mcap` is **not** the mirror of this. Its band is reachable: the 56.6 score sat at
+0.108, inside the band, and was paid 5.8/15 for it. Its low aggregate says these coins are thin,
+which is the component working, not a band in the wrong place.
+
+With the buyer side delivering ~28 of 35, a pass needs **83% of momentum + liquidity/mcap +
+holder growth**. Three coins is an anecdote, so nothing here has been reweighted — but on this
+evidence `unique_buyers`' upper bound and `buy_sell_ratio`'s price blindness are the specific
+things to look at, not the 70.
 
 **The buy/sell ratio counts heads, not size, and does not look at the price.** It is unique buyers
 over unique sellers in the last hour, and `lin(x, 1.0, 2.0)` saturates at 2.0 — so many small
