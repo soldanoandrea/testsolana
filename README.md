@@ -363,6 +363,30 @@ Nothing is changed here: both the zero and the threshold are deliberate, and 18 
 to re-weight anything. It is written down because the shape of the problem — a measurement absent
 rather than bad — is the kind that reads as a market verdict in the log.
 
+### `holder_growth` cannot tell a coin that is dying from one standing still
+
+`holder_growth` is `lin(x, 0, 20)`, and `lin` clamps below its floor, so every rate at or under zero
+scores the same. Checked: −61.5, −40, −20, −5 and 0 %/h all pay **0.0 of 15**.
+
+`HODL` is what that costs. It scored **55.0** on 2026-11-07 at 02:20 — perfect momentum (20/20),
+perfect buyer count (15/15), saturated buy/sell (20/20), and zero on the other three — while its
+holder count fell from 6,202 to 5,840 inside the observation window, a rate of **−61.5%/h**. Its
+total is 55.0 whether that rate is −61.5, −20 or exactly flat, and 55.0 is precisely
+`ANALYST_MIN_SCORE − ANALYST_RETRY_WITHIN`: the near-miss floor. **It bought itself a retry while its
+holders were leaving at three fifths an hour.** An hour later it scored 31.6 and died.
+
+The shape of the problem is worth stating, because it is not the one the other band notes describe.
+Those are about a ceiling reached too easily. This is a **floor that merges two opposite states**:
+five of the six components separate a coin being abandoned from a coin going nowhere — momentum
+reads the price, buy/sell reads the balance of sides, liquidity/mcap reads the pool — and the one
+that cannot is `holder_growth`, which is the only reason the Analyst holds a coin for
+`DESK_HOLDER_WINDOW_S` at all. The desk pays 300 seconds to measure a quantity whose bad half it
+then discards.
+
+Nothing is changed. A curve that can go negative, or a floor below zero, changes who lands in the
+near-miss band and therefore which coins get traded — not a documentation decision, and the measured
+case for it is one coin.
+
 ### Open question: is the near-miss bench worth its cost?
 
 The retry added in `d63da24` has now run four times, and three of the four scores came back worse.
@@ -386,6 +410,16 @@ If that holds, the retry's expected value is **negative**: it spends up to two f
 observation windows plus RugCheck and the RPC to look at coins that are, on average, 17 points worse
 than when they were set aside. The counter-argument is `401kinu`'s +2.1 and the fact that none of
 these entered, so the budget never cost a bad trade — only the calls.
+
+**And the gap is smaller than one penalty the score applies.** `momentum`'s fade runs from +50%/h to
+R8's +80% line and costs up to **10 of its 20 points** (factor 0.5 at or above 80). The best score
+ever produced was 8.8 short of the threshold — `APPLEPAID` at 61.2, with a 1 h change of **+79.40%**,
+0.60 below the line that would have killed it outright, and 9.8 points of fade already applied.
+Cooling only that input, everything else held: +70% gives 64.4, +60% gives 67.7, **+50% gives 71.0
+and it passes**. That is a sensitivity analysis and not a counterfactual — a coin up 25% in the hour
+would not have had APPLEPAID's volume or liquidity — but it locates the gap. The distance to a trade
+is narrower than the maximum the fade deducts, so "the population scores too low" is less accurate
+than "the one coin that came close was held back by where R8 sits against the slope of the fade".
 
 **This question is subordinate to a larger one.** Across 19 scores the maximum ever reached is 61.2,
 the median 36.5, and **none has reached 70** — the best coin the desk has ever seen was 8.8 points
