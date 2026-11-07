@@ -291,6 +291,39 @@ wider slippage (6%, then 12%, then 24%, capped there) so exits get out, and the 
 on the position so the next tick carries on widening instead of restarting at 3%. Use a private RPC
 (`SOLANA_RPC_URL`, e.g. Helius) because the public one rate-limits.
 
+### Open question: "facts about the token" includes three moving numbers
+
+The rationale above says rules 1, 2, 5, 6 and 7 are *facts about the token* and "do not improve", so
+they kill for good, while 3, 4 and 8 "describe the hour" and bench. Measured against a real case,
+that split does not hold cleanly.
+
+`Degen` was buried permanently at 00:35 on 2026-11-07 with the detail **"top10 25.1% > 25%"**. One
+tenth of a point over the line, and the consequence is absolute: it can never be looked at again.
+But the top 10's share is not a fact like a revoked authority — it is a number that moves every time
+those wallets trade. A coin at 25.1% today can be at 22% tomorrow, which is precisely the argument
+`FILTER_TRANSIENT_RULES` makes for R3.
+
+Of the five permanent rules, only two are genuinely binary:
+
+| Rule | What it reads | Can it change? |
+|---|---|---|
+| R1 authorities | two flags on the mint | no, revocation is one-way |
+| R2 LP locked/burned | ≥95% locked | effectively no |
+| R5 top 10 share | 25.0% line | **yes, wallets trade** |
+| R6 dev share | 3.0% line | **yes** — observed moving 32.73% → 81.39% in eight minutes (LIA) |
+| R7 bundled share | 10.0% line | **yes**, and it is a lower bound |
+
+So three of the five kill for good on a percentage that drifts, and one of them has been observed
+moving 48 points in eight minutes. The counter-argument is real: concentration usually drifts
+slowly, a coin whose top 10 hold a quarter of the supply is fragile whatever it does next, and a
+bench on a safety rule would mean re-paying RugCheck and the RPC for every retry — the expensive
+half of the Filter, not the free half that R3/R4/R8 sit in.
+
+That last point may be the whole answer, in which case the README should say *"these are the
+expensive checks, so one verdict is final"* rather than *"these do not improve"*, because the second
+claim is not true of R5, R6 and R7. Nothing is changed here: moving a safety rule to the bench
+changes which coins can be traded, and that is not a documentation decision.
+
 ### A missing buyer count is a silent disqualification
 
 `buyers_h1` comes from GeckoTerminal's hourly pool activity, and over the first day of paper it was
