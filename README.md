@@ -377,7 +377,14 @@ observation windows plus RugCheck and the RPC to look at coins that are, on aver
 than when they were set aside. The counter-argument is `401kinu`'s +2.1 and the fact that none of
 these entered, so the budget never cost a bad trade — only the calls.
 
-What would settle it: twenty-odd retries, and whether any retry has ever crossed 70. Five in, none has. Until then the
+**This question is subordinate to a larger one.** Across 19 scores the maximum ever reached is 61.2,
+the median 36.5, and **none has reached 70** — the best coin the desk has ever seen was 8.8 points
+short. If what passes the Filter does not reach the threshold, the retry is negative-value whatever
+its curve looks like, and re-weighting the wait would not change the outcome. The retry's expected
+value is a symptom; the 8.8 points are the thing to decide about.
+
+What would settle this one: twenty-odd retries, and whether any retry has ever crossed 70. Five in,
+none has. Until then the
 wait is left at an hour, because shortening it to catch the coin mid-move argues for the opposite of
 what `FILTER_BENCH_S` argues, and both cannot be tuned on four observations.
 
