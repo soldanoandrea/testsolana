@@ -383,9 +383,26 @@ that cannot is `holder_growth`, which is the only reason the Analyst holds a coi
 `DESK_HOLDER_WINDOW_S` at all. The desk pays 300 seconds to measure a quantity whose bad half it
 then discards.
 
+**How often the clamp is load-bearing: 7 of 21 scores (33%).** Every score whose holder rate was at
+or below zero, with what the clamp merged:
+
+| | holder rate | total |
+|---|---|---|
+| `XTO` | **0.00%/h** (4466 → 4466, exactly flat) | 35.0 |
+| `MUTTAPE` | −2.10%/h | 31.0 |
+| `COGE` | −2.94%/h | **56.6** — near-miss band |
+| `AMD` | −9.79%/h | 36.5 |
+| `DCAT` | −11.30%/h | 47.7 |
+| `COGE` | −13.18%/h | 24.5 |
+| `HODL` | **−61.46%/h** (6202 → 5840) | **55.0** — near-miss band |
+
+`XTO` and `HODL` are the two ends: a coin whose holder count did not move by a single wallet and a
+coin losing three fifths of its holders an hour are paid the same 0 of 15. And the clamp has twice
+helped a coin into the near-miss band while its holders were shrinking — `COGE` at 56.6 and `HODL`
+at 55.0, the second of which was exactly on the floor.
+
 Nothing is changed. A curve that can go negative, or a floor below zero, changes who lands in the
-near-miss band and therefore which coins get traded — not a documentation decision, and the measured
-case for it is one coin.
+near-miss band and therefore which coins get traded — not a documentation decision.
 
 ### Open question: is the near-miss bench worth its cost?
 
