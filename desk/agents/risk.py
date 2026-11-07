@@ -1,4 +1,4 @@
-"""RISK: stop at −6% set before the order, never lowered; trailing stop after +12%; exits only on stop/trail."""
+"""RISK: stop at −30% set before the order, never lowered; trailing stop after +60%; exits only on stop/trail."""
 from __future__ import annotations
 
 from .. import rules

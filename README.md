@@ -11,6 +11,10 @@ LOGGER records every step → data/<mode>/events.jsonl, recap-YYYY-MM-DD.md
 The thresholds are constants in [`desk/rules.py`](desk/rules.py). Config files and environment
 variables can't change them, so paper and live run on exactly the same rules.
 
+[`PORTFOLIO.md`](PORTFOLIO.md) is a design note on the proposal to replace directional
+entries with a continuously rebalancing portfolio: what holds, what the turnover arithmetic refuses,
+and the two gaps (no time stop, no actor memory) that any version of it depends on.
+
 ## Agents
 
 | Agent | What it does | Data |
