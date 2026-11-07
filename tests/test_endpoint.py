@@ -139,3 +139,32 @@ def test_an_empty_secret_is_not_a_url(monkeypatch):
                         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="  \n", stderr=""))
     with pytest.raises(SecretUnavailable, match="returned nothing"):
         read_secret("op://Esamatic/Helius/url")
+
+
+# ------------------------------------------------------------------ the helper that stores it
+def test_a_bare_key_becomes_a_helius_url_whose_redaction_hides_it():
+    from tools.store_rpc_endpoint import endpoint_url
+
+    url = endpoint_url(KEY)
+    assert url == f"https://mainnet.helius-rpc.com/?api-key={KEY}"
+    assert KEY not in redact(url)
+
+
+def test_a_full_url_from_another_provider_is_taken_as_given():
+    from tools.store_rpc_endpoint import endpoint_url
+
+    assert endpoint_url(KEYED["alchemy (path)"]) == KEYED["alchemy (path)"]
+
+
+@pytest.mark.parametrize("bad,why", [
+    ("", "niente"),
+    ("   ", "niente"),
+    ("http://mainnet.helius-rpc.com/?api-key=x", "https"),
+    ("https:///no-host", "URL"),
+    ("key with spaces", "spazi"),
+])
+def test_what_the_helper_refuses_to_store(bad, why):
+    from tools.store_rpc_endpoint import endpoint_url
+
+    with pytest.raises(ValueError, match=why):
+        endpoint_url(bad)

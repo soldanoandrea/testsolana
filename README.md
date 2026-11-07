@@ -314,9 +314,19 @@ so the URL is a secret and cannot live in a file, a `.env` or a stored environme
 What is configured is a **1Password reference**, which is not a secret:
 
 ```bash
-export DESK_RPC_URL_REF="op://<vault>/<item>/<field>"   # and OP_ACCOUNT if you have several
-python -m desk rpc                                      # says what answers, never prints the URL
+python3 tools/store_rpc_endpoint.py     # asks for the key with the echo off, stores it, prints the ref
+export DESK_RPC_URL_REF="op://<vault>/<item>/credential"
+export DESK_OP_ACCOUNT="<account>"      # `op` refuses to guess when several are signed in
+python -m desk rpc                      # says what answers, never prints the URL
 ```
+
+[`tools/store_rpc_endpoint.py`](tools/store_rpc_endpoint.py) is there because the obvious way to do
+this leaks. It reads the key with `getpass`, builds the URL, and hands it to `op item create` **on
+stdin** — never as a command argument, which 1Password's own CLI warns "get logged in your command
+history, and can be visible to other processes", and never through a shell variable, a here-string
+(bash writes those to a temp file) or an environment variable. It prints only `scheme://host/…`, so
+its output is safe to paste back, and it reads the item back and compares before telling you the
+reference works.
 
 `Config.rpc_url()` resolves it with `op read` into the process and nowhere else. If the reference
 cannot be read it **raises instead of falling back**: quietly dropping to the public endpoint would

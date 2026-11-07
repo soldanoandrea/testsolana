@@ -20,7 +20,7 @@ class SecretUnavailable(Exception):
     """A configured secret reference could not be resolved. Never falls back quietly."""
 
 
-def read_secret(ref: str) -> str:
+def read_secret(ref: str, account: str = "") -> str:
     """Resolve a 1Password secret reference (`op://Vault/Item/field`) with the `op` CLI.
 
     The reference is not a secret, so it can live in a shell profile or a launchd plist; the value
@@ -35,9 +35,13 @@ def read_secret(ref: str) -> str:
     """
     if not ref.startswith("op://"):
         raise SecretUnavailable(f"a secret reference must start with op:// (got {ref[:8]!r}…)")
+    # An account shorthand is not a secret. It has to be explicit when more than one account is
+    # signed in, and `op` fails with "multiple accounts found" rather than guessing -- which is
+    # the right behaviour and the reason this is a setting instead of a global OP_ACCOUNT export
+    # that would follow the user into every other `op` command they run.
+    cmd = ["op", "read", "--no-newline", ref] + (["--account", account] if account else [])
     try:
-        r = subprocess.run(["op", "read", "--no-newline", ref],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     except FileNotFoundError:
         raise SecretUnavailable("1Password CLI `op` not found: install it, or unset the reference "
                                 "and export SOLANA_RPC_URL for one command instead") from None
@@ -46,7 +50,7 @@ def read_secret(ref: str) -> str:
     if r.returncode != 0:
         # op's stderr names the item and the account, never the value
         why = (r.stderr or "").strip().splitlines()
-        raise SecretUnavailable(f"`op read {ref}` failed: {why[-1] if why else f'exit {r.returncode}'}")
+        raise SecretUnavailable(f"`{' '.join(cmd)}` failed: {why[-1] if why else f'exit {r.returncode}'}")
     value = r.stdout.strip()
     if not value:
         raise SecretUnavailable(f"`op read {ref}` returned nothing")
@@ -70,6 +74,9 @@ class Config:
     # SOLANA_RPC_URL for a paid endpoint, whose credential is part of the URL: the reference can
     # be stored, the URL cannot. See read_secret().
     solana_rpc_url_ref: str = _env("DESK_RPC_URL_REF", "")
+    # Which 1Password account the reference lives in (a shorthand like "esamaticsrl.1password.eu").
+    # Not a secret. Required when more than one account is signed in, because `op` refuses to pick.
+    op_account: str = _env("DESK_OP_ACCOUNT", "")
     jupiter_base: str = _env("JUPITER_BASE", "https://lite-api.jup.ag")
 
     # paper
@@ -90,13 +97,14 @@ class Config:
     def rpc_url(self) -> str:
         """The endpoint to use, resolved once per process. Raises if a reference cannot be read."""
         if self.solana_rpc_url_ref:
-            return read_secret(self.solana_rpc_url_ref)
+            return read_secret(self.solana_rpc_url_ref, self.op_account)
         return self.solana_rpc_url
 
     def rpc_source(self) -> str:
         """Where the endpoint came from, for a startup line that must not contain the URL."""
         if self.solana_rpc_url_ref:
-            return f"1Password ({self.solana_rpc_url_ref})"
+            acct = f" @{self.op_account}" if self.op_account else ""
+            return f"1Password ({self.solana_rpc_url_ref}{acct})"
         if self.solana_rpc_url != PUBLIC_RPC:
             return "SOLANA_RPC_URL"
         return "public endpoint (no key: RpcHolders cannot answer)"
