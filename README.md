@@ -301,8 +301,37 @@ passes it logs `live_gate_passed` with the paper stats it accepted.
 Live mode buys and sells through Jupiter (`lite-api.jup.ag`) with 3% max slippage, and keeps 0.05
 SOL back for fees. The balance is the wallet's SOL in USD. If a sell fails, it's retried with
 wider slippage (6%, then 12%, then 24%, capped there) so exits get out, and the escalation is kept
-on the position so the next tick carries on widening instead of restarting at 3%. Use a private RPC
-(`SOLANA_RPC_URL`, e.g. Helius) because the public one rate-limits.
+on the position so the next tick carries on widening instead of restarting at 3%.
+
+### The RPC endpoint, and why it is never written down
+
+A paid endpoint is not just faster: `getTokenLargestAccounts` is an **indexed** call that keyless
+endpoints refuse outright, so without one R5 has no ground-truth holder source at all
+([the chain below](#who-holds-the-token-and-who-only-looks-like-it-does)). But a paid endpoint
+carries its credential *inside the URL* — Helius in the query, Alchemy and QuickNode in the path —
+so the URL is a secret and cannot live in a file, a `.env` or a stored environment variable.
+
+What is configured is a **1Password reference**, which is not a secret:
+
+```bash
+export DESK_RPC_URL_REF="op://<vault>/<item>/<field>"   # and OP_ACCOUNT if you have several
+python -m desk rpc                                      # says what answers, never prints the URL
+```
+
+`Config.rpc_url()` resolves it with `op read` into the process and nowhere else. If the reference
+cannot be read it **raises instead of falling back**: quietly dropping to the public endpoint would
+put R5 back on one intermittent field with nothing in the log to say why. `SOLANA_RPC_URL` still
+works for a shell that exports it for a single command.
+
+Two things make sure the credential cannot escape by accident:
+
+- `desk/http.py` `redact()` reduces every URL to `scheme://host/…` before it can reach an
+  exception, `events.jsonl` or a kill detail. The client used to raise `f"{url}: HTTP {code}"` and
+  `repr()` of a `requests` error, both of which carry the whole URL, and both fired on exactly the
+  429s a rate-limited paid endpoint produces.
+- the `start` event logs `rpc` as the *origin* — `1Password (op://…)`, `SOLANA_RPC_URL`, or
+  `public endpoint (no key: RpcHolders cannot answer)` — so a log says which holder source was
+  live that night without containing the endpoint.
 
 ### What the live gate proves, and what it does not
 
@@ -624,7 +653,7 @@ distinguishable from a kill about the coin:
 
 | provider | call | status |
 |---|---|---|
-| `RpcHolders` | `getTokenLargestAccounts` + 2× `getMultipleAccounts` | **needs a keyed endpoint.** The call is *indexed*: the public RPC answers `429 "Too many requests for a specific RPC call"`, publicnode wants a personal token, drpc wants a paid plan. Set `SOLANA_RPC_URL` and it takes over. |
+| `RpcHolders` | `getTokenLargestAccounts` + 2× `getMultipleAccounts` | **needs a keyed endpoint.** The call is *indexed*: the public RPC answers `429 "Too many requests for a specific RPC call"`, publicnode wants a personal token, drpc wants a paid plan. Configure one [as a 1Password reference](#the-rpc-endpoint-and-why-it-is-never-written-down) and it takes over; `python -m desk rpc` says whether it did. |
 | `RugCheckHolders` | none — the report is already paid for | the intermittent field above, now a fallback rather than the only answer |
 
 Two more things changed with it:
@@ -835,5 +864,6 @@ python -m desk actors --backfill            # recover creators for coins already
   the enumeration step has never run against a real mint. Everything after it was verified against
   the live chain: owner resolution agreed with RugCheck on 60 of 60 token accounts across three
   coins, and the program classification is what found the unlabelled bonding-curve account. Until
-  `SOLANA_RPC_URL` points at a keyed endpoint, R5 still rests on RugCheck's intermittent field —
-  the chain just decides which of its rows are people.
+  a keyed endpoint is configured, R5 still rests on RugCheck's intermittent field — the chain just
+  decides which of its rows are people. `python -m desk rpc` reports which of the four calls the
+  configured endpoint actually answers, and exits non-zero while the indexed one is refused.

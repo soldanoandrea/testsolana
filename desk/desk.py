@@ -73,7 +73,7 @@ class Desk:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.http = Http()
-        self.src = Sources(self.http, cfg.solana_rpc_url, cfg.jupiter_base)
+        self.src = Sources(self.http, cfg.rpc_url(), cfg.jupiter_base)
         self.log = Logger(cfg.path("events.jsonl"))
         self.state = State.load(cfg.path("state.json"), cfg.paper_start_balance_usd, log=self.log)
         if cfg.mode == "live":
@@ -335,8 +335,12 @@ class Desk:
         end = time.time() + hours * 3600 if hours else None
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: self.stop_evt.set())
+        # `rpc` is where the endpoint came from, never the endpoint: a paid URL is a credential.
+        # It belongs in the log because it decides whether R5 reads the chain or RugCheck's
+        # intermittent field, and until now nothing in the log said which.
         self.log.log("start", mode=self.cfg.mode, balance=self.broker.balance_usd(),
-                     smart_wallets=len(self.analyst.smart_wallets), open_positions=len(self.state.positions))
+                     smart_wallets=len(self.analyst.smart_wallets), rpc=self.cfg.rpc_source(),
+                     open_positions=len(self.state.positions))
         rt = threading.Thread(target=self._risk_loop, name="risk", daemon=True)
         rt.start()
         try:

@@ -12,6 +12,25 @@ class DataUnavailable(Exception):
     """Raised when a data source cannot answer. Callers treat this as fail-closed."""
 
 
+def redact(url: str) -> str:
+    """`scheme://host` and nothing else, for anything that might be written down.
+
+    A paid RPC endpoint carries its credential in the URL -- Helius in the query
+    (`?api-key=…`), Alchemy and QuickNode in the path -- and this client's errors travel into
+    `events.jsonl` and into kill details on every 429. Whoever reads an error needs the host that
+    failed, never the rest. Only the parts that cannot hold a secret are kept, so a provider that
+    invents a new place to put one is covered too.
+    """
+    try:
+        u = urlparse(url)
+    except ValueError:
+        return "<unparseable url>"
+    if not u.scheme or not u.hostname:
+        return "<url>"
+    rest = "/…" if (u.path.strip("/") or u.query or u.params or u.fragment) else ""
+    return f"{u.scheme}://{u.hostname}{rest}"
+
+
 class RateLimiter:
     def __init__(self, per_minute: int):
         self.interval = 60.0 / per_minute
@@ -34,6 +53,11 @@ HOST_LIMITS = {
     "api.rugcheck.xyz": 60,
     "api.mainnet-beta.solana.com": 80,
     "lite-api.jup.ag": 50,
+    # Paid RPC. The limit that actually binds on these is a credit budget, not a rate, so this is
+    # a politeness cap: the desk makes 3 calls per coin that reaches the paid sources, about 8
+    # coins per 4 h run.
+    "mainnet.helius-rpc.com": 120,
+    "rpc.helius.xyz": 120,
 }
 
 
@@ -64,12 +88,13 @@ class Http:
                     time.sleep(2 ** attempt * 2)
                     continue
                 if r.status_code >= 400:
-                    raise DataUnavailable(f"{url}: HTTP {r.status_code}")
+                    raise DataUnavailable(f"{redact(url)}: HTTP {r.status_code}")
                 return r.json()
             except (requests.RequestException, ValueError) as e:
-                last = repr(e)
+                # repr(e) on a requests error embeds the full URL, credential included.
+                last = f"{type(e).__name__}: {redact(url)}"
                 time.sleep(2 ** attempt)
-        raise DataUnavailable(f"{url}: {last}")
+        raise DataUnavailable(f"{redact(url)}: {last}")
 
     def get(self, url: str, **kw):
         return self.request("GET", url, **kw)
