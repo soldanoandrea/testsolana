@@ -206,17 +206,24 @@ record.
 **`unique_buyers` is calibrated away from the coins that reach the Analyst.** Measured over the
 three scores of the first paper night:
 
-| component | scored | band | observed inputs |
-|---|---|---|---|
-| `unique_buyers` | 80% of max | 50 → 400 buyers | **185, 1751, 3182** |
-| `buy_sell_ratio` | 82% of max | 1.0 → 2.0 | 1.47, 2.89, 3.52 |
-| `momentum` | 26% | — | −7.4%, −10.1%, +60.4% |
-| `liquidity_to_mcap` | 13% | 0.05 → 0.20 | 0.039, 0.051, **0.108** |
-| `holder_growth` | 8% | 0 → 20%/h | 0, 0, 4.7%/h |
+| component | delivered | saturated | band | observed range |
+|---|---|---|---|---|
+| `unique_buyers` | 69% | **12 of 19** | 50 → 400 buyers | 185 → 4267 |
+| `buy_sell_ratio` | 64% | 9 of 19 | 1.0 → 2.0 | 1.047 → 3.52 |
+| `liquidity_to_mcap` | 46% | 4 of 19 | 0.05 → 0.20 | 0.039 → **0.428** |
+| `momentum` | 36% | 2 of 19 | see curve | −10.1% → +60.4% |
+| `holder_growth` | 27% | 2 of 19 | 0 → 20%/h | −9.8 → +7.1%/h |
+| `smart_wallets` | 0% | 0 of 19 | own list | empty list, always 0 |
+
+An earlier version of this table was measured on the first **three** scores and is superseded by
+the figures above. It is worth saying how wrong three was: it put the buyer pair at 80/82% against
+13% for liquidity/mcap and 8% for holder growth, i.e. a near-dead component and a near-constant
+pair. Over nineteen the gap is 66% against 36% — still a gap, but a third of the size, and
+liquidity/mcap turns out to pay across its whole range and saturate for four coins.
 
 A coin only reaches the Analyst by clearing R4 ($50k hourly volume), and at that volume the buyer
-count is in the hundreds to thousands — 4 to 8 times past where `unique_buyers` tops out, so it
-saturates for structural reasons rather than because the coin is good. `buy_sell_ratio` is weak
+count is in the hundreds to thousands — up to 10 times past where `unique_buyers` tops out, which
+is why it saturates for 12 of 19 coins rather than because those coins were good. `buy_sell_ratio` is weak
 for a different reason: it saturates at a ratio of 2.0 and never looks at the price, so it paid
 20/20 on an hour in which `RAMBO` fell 10%. `unique_buyers` itself is not a constant — 15.0, 15.0,
 5.8 — and does discriminate.
@@ -603,21 +610,21 @@ half of the prior works today, the wallet half only starts accumulating from her
 
 **What the Filter's re-check is worth, measured.** The Analyst sends a coin back through all
 eight rules on fresh data before scoring it, because the observation window is long enough for the
-data the Filter decided on to go stale. Over 23 windows opened so far, 22 of them finished:
+data the Filter decided on to go stale. All 23 windows opened so far have finished:
 
 | how the window ended | count |
 |---|---|
-| scored | 18 |
+| scored | 19 |
 | killed at the re-check, R8 (pump born inside the window) | 3 |
 | killed at the re-check, R3 (liquidity fell) | 1 |
 
-So **4 of 22, 18%**, end with the coin killed on data that arrived during its own window rather
+So **4 of 23, 17%**, end with the coin killed on data that arrived during its own window rather
 than being scored — and three of the four are pumps that started while we were watching. `FUSE`
 has been through this twice: observed at 22:43, R8 at 22:49; observed again at 04:24. The step is
 not a formality.
 
-**Eighteen scores, and the gap to the threshold.** Highest 61.2 (`APPLEPAID`), median 36.5, lowest
-24.5. Six landed in the near-miss band, twelve below it, and **none has reached 70**, so the desk
+**Nineteen scores, and the gap to the threshold.** Highest 61.2 (`APPLEPAID`), median 36.5, lowest
+24.5. Six landed in the near-miss band, thirteen below it, and **none has reached 70**, so the desk
 has never opened a position: the stop, the trail, the position cap and the daily loss limit have
 all been exercised only in tests. The best coin seen in roughly 29 hours of paper was **8.8 points
 short**. Whatever is decided about the bands, that is the number the decision is about.
