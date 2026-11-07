@@ -31,8 +31,8 @@ def main(argv=None) -> int:
     ac = sub.add_parser("actors")
     ac.add_argument("--mode", choices=["paper", "live"], default="paper")
     ac.add_argument("--backfill", action="store_true",
-                    help="re-fetch RugCheck for coins already in the log (creators only: "
-                         "the holder table is erased once a pool is gone)")
+                    help="re-fetch RugCheck for coins already in the log (creators and launch "
+                         "history; the holder table is only there when RugCheck feels like it)")
     ac.add_argument("--events", action="append", default=[],
                     help="extra events.jsonl to take coins from; repeatable")
     a = ap.parse_args(argv)
@@ -79,7 +79,8 @@ def _actors(cfg, a) -> int:
             ev += Logger(Path(extra), echo=False).events()
         src = Sources(Http(), cfg.solana_rpc_url, cfg.jupiter_base)
         print(f"Backfill da {len(ev)} eventi. Recupera creator e storico lanci; la tabella holder "
-              f"viene erasa da RugCheck quando il pool si svuota, quindi il grafo wallet parte da ora.")
+              f"la restituisce o no RugCheck, in modo intermittente, quindi il grafo wallet si "
+              f"popola solo sui look che ce l'hanno.")
         res = backfill_from_events(store, ev, src.rug)
         print("\n" + _json.dumps(res, indent=1))
     s = store.summary()

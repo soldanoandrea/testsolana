@@ -142,6 +142,43 @@ class SolanaRPC:
             raise DataUnavailable(f"mint {mint} not found")
         return v["data"]["parsed"]["info"]
 
+    def token_largest_accounts(self, mint: str) -> list[dict]:
+        """The 20 largest token accounts for a mint.
+
+        An **indexed** call: it needs the node's spl-token secondary index, which keyless
+        endpoints refuse (the public one answers 429 "Too many requests for a specific RPC call").
+        Raises DataUnavailable there, which is what makes the holder provider chain in
+        desk/holders.py necessary rather than tidy.
+        """
+        return self.call("getTokenLargestAccounts", [mint])["value"] or []
+
+    def accounts(self, addrs: list[str], encoding: str = "jsonParsed") -> dict[str, dict | None]:
+        """getMultipleAccounts, batched at the RPC's limit of 100, keyed by address."""
+        out: dict[str, dict | None] = {}
+        cfg = {"encoding": encoding}
+        if encoding == "base64":
+            cfg["dataSlice"] = {"offset": 0, "length": 0}   # we only want who owns it
+        for i in range(0, len(addrs), 100):
+            chunk = list(addrs[i:i + 100])
+            out.update(zip(chunk, self.call("getMultipleAccounts", [chunk, cfg])["value"]))
+        return out
+
+    def token_account_owners(self, addrs: list[str]) -> dict[str, str | None]:
+        """Token account -> the wallet it belongs to. None when the account cannot be parsed."""
+        out: dict[str, str | None] = {}
+        for a, v in self.accounts(list(addrs)).items():
+            try:
+                out[a] = v["data"]["parsed"]["info"]["owner"]
+            except (TypeError, KeyError):
+                out[a] = None
+        return out
+
+    def account_programs(self, addrs: list[str]) -> dict[str, str | None]:
+        """Account -> the program that owns it. A person's wallet is owned by the System Program;
+        a pool vault's authority, a bonding curve or an escrow is owned by its DEX program.
+        None means the account does not exist, which a never-funded wallet looks like."""
+        return {a: (v or {}).get("owner") for a, v in self.accounts(list(addrs), "base64").items()}
+
     def token_balance(self, owner: str, mint: str) -> float:
         r = self.call("getTokenAccountsByOwner", [owner, {"mint": mint}, {"encoding": "jsonParsed"}])
         total = 0.0

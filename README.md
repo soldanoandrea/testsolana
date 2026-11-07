@@ -14,6 +14,9 @@ variables can't change them, so paper and live run on exactly the same rules.
 [`PORTFOLIO.md`](PORTFOLIO.md) is a design note on the proposal to replace directional
 entries with a continuously rebalancing portfolio: what holds, what the turnover arithmetic refuses,
 and the two gaps (no time stop, no actor memory) that any version of it depends on.
+[`VENUES.md`](VENUES.md) answers the next question — how much of this desk works on a centralised
+exchange — rule by rule: the execution half ports, the eight kill rules mostly do not, and the fee
+arithmetic above is the one answer the venue changes.
 
 ## Agents
 
@@ -31,7 +34,7 @@ and the two gaps (no time stop, no actor memory) that any version of it depends 
 2. Less than 95% of the traded pair's LP burned or locked.
 3. Liquidity under $40k.
 4. 1h volume under $50k.
-5. Top 10 holders own more than 25%. Pool vaults and lockers are excluded, since they aren't holders.
+5. Top 10 holders own more than 25%. Pool vaults and lockers are excluded, since they aren't holders. The holder table comes from [a provider chain](#who-holds-the-token-and-who-only-looks-like-it-does), not from one field.
 6. Dev wallet holds more than 3%, or one of the dev's last 5 launches is flagged `rugged` by RugCheck. An unknown dev also dies.
 7. Bundled share over 10%: the most RugCheck shows either in its linked insider networks (wallets funded together or buying in bundles) or in the top holders it flags as insiders. The figure is a **lower bound**: RugCheck gives each insider network's holdings but not its wallet list, so a wallet in two networks is counted twice and the sum can exceed the supply (`MNST`, 2026-11-06, logged 216.8%). It cannot be deduplicated from this data, so it is reported as `>=X%` and said to be a sum. The verdict is unaffected — anything over 10% kills either way.
 8. Price already up 80% or more in the last hour.
@@ -605,6 +608,61 @@ empty because the index is empty, not because nothing repeats. That is the same 
 smart-wallet list: the creator graph could be backfilled because `creator` survives, the wallet
 graph can only be grown forward from here.
 
+### Who holds the token, and who only looks like it does
+
+`top10_pct` used to read RugCheck's `topHolders` and nothing else. That field is **absent
+intermittently, server-side, on live tokens as much as dead ones**: `PUMP` — $22M liquidity,
+1.34M holders — returned 20 holders and then `None` twenty-five minutes later, `None` on six
+consecutive probes 20 s apart through two different HTTP clients, with `totalHolders` unchanged.
+When it is absent, `top10_pct` is `None`, R5 reads *"holders unverifiable"* and the coin dies.
+Fail-closed is the right default and it was the wrong reason: the kill was about a third party's
+uptime. 66 of the 75 records in the actor store carry no holder table.
+
+So [`desk/holders.py`](desk/holders.py) makes the table a **provider chain**, and the answer says
+who spoke. It is in the kill log as `holders_src`, so a kill reading `holders_src: none` is
+distinguishable from a kill about the coin:
+
+| provider | call | status |
+|---|---|---|
+| `RpcHolders` | `getTokenLargestAccounts` + 2× `getMultipleAccounts` | **needs a keyed endpoint.** The call is *indexed*: the public RPC answers `429 "Too many requests for a specific RPC call"`, publicnode wants a personal token, drpc wants a paid plan. Set `SOLANA_RPC_URL` and it takes over. |
+| `RugCheckHolders` | none — the report is already paid for | the intermittent field above, now a fallback rather than the only answer |
+
+Two more things changed with it:
+
+- **One `getMultipleAccounts` works on the free endpoint**, so even when RugCheck is the provider
+  the desk asks the chain which holders are program accounts. On `Alice` that catches an account
+  holding 1.10% that RugCheck had no label for and that turned out to belong to the Pump.fun
+  bonding curve.
+- **An absent holder table used to fire three rules at once.** R5, plus R6 (the dev's share was
+  computed inside the same branch, although `creatorBalance` is a share of supply by itself) and
+  R7 (the bundled share, although RugCheck's insider graph is computed without the holder table).
+  One missing field was reported as three independent problems; now it kills on R5 alone.
+
+#### What counts as a holder, and a test that was tried and rejected
+
+A pool vault is not somebody's position. RugCheck labels some in `knownAccounts` (`AMM`,
+`LOCKER`) and the Filter always excluded those; the list is incomplete. Two exclusions replace it:
+**the coin's own markets**, read out of `markets[]` in the same report (each pool's `pubkey`, its
+`liquidity*` token accounts, their authority, the LP mint — derived per coin, so it covers a DEX
+nobody here has heard of), and **owned by a program**, since an account the System Program does
+not own cannot be signed for by a person.
+
+A third test looked complete and is not. A program-derived address is off the ed25519 curve by
+construction, so "off the curve" means "nobody holds a key for this" with no list and no call.
+It reproduced RugCheck's labels exactly on the 9 coins that have a holder table — all 7
+`AMM`/`LOCKER` accounts off the curve, all 94 unlabelled owners on it — and then it met `PUMP`,
+where **11 of the 20 top holders are off-curve addresses the System Program owns**, together
+about 58% of supply: escrow and vesting allocations, not pools. Excluding them would have cut
+`top10_pct` to 12.11% and made the most concentrated token the desk has looked at read as the
+safest. An escrow can release and sell, which is what R5 exists to measure, so it is counted.
+The test survives as information — the actor store uses it to avoid indexing an address nobody
+can sign for as an *actor* — and never as a reason to drop a holder from a concentration rule.
+The direction is the whole argument: leaving a holder out can only let a coin past R5, counting
+one that was really a vault can only kill a coin that was fine.
+
+Measured on the 9 records with a holder table, the exclusions move one `top10_pct` by 0.77 points
+and flip no verdict, `WEALTH` included — killed on R5 at 25.29% against a 25% threshold.
+
 ### Actor memory: who was behind the coin
 
 `desk/actors.py` writes down, at the moment the Filter pays for a RugCheck report, who was behind
@@ -771,5 +829,11 @@ python -m desk actors --backfill            # recover creators for coins already
 - Smart wallets means *your* list. Holding the token counts as buying it.
 - **The actor store's wallet graph starts empty and cannot be backfilled.** Creators were recovered
   for 65 of 67 past coins; holder tables for none. Cross-coin wallet links only exist for coins
-  looked at from now on, and only for the looks where RugCheck actually returns `topHolders` —
-  which it did not, for any token tried, in the second half of this session.
+  looked at from now on, and only for the looks that carry a holder table at all.
+- **The ground-truth holder source is written but unverified end to end.** `RpcHolders` needs an
+  endpoint that keeps the spl-token index, and every keyless endpoint tried refuses the call, so
+  the enumeration step has never run against a real mint. Everything after it was verified against
+  the live chain: owner resolution agreed with RugCheck on 60 of 60 token accounts across three
+  coins, and the program classification is what found the unlabelled bonding-curve account. Until
+  `SOLANA_RPC_URL` points at a keyed endpoint, R5 still rests on RugCheck's intermittent field —
+  the chain just decides which of its rows are people.

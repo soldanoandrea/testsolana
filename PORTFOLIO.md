@@ -162,7 +162,16 @@ yet": not a new model on the same six components, but a new column.
    and could never have been backfilled. The creator half was recoverable, and the first thing it
    showed is one wallet behind six coins the desk had judged separately — killing one on the dev
    rule and then scoring two others from the same hand. The same intermittency makes R5
-   unverifiable whenever it bites, which is now the strongest argument for step 2.
+   unverifiable whenever it bites, which is now the strongest argument for step 1b.
+1b. ~~**Holders from the chain, not from one field**~~ — **done**, `desk/holders.py`, see
+   [the README section](README.md#who-holds-the-token-and-who-only-looks-like-it-does). R5 now
+   reads a provider chain and the kill log says who answered, so a kill for a missing holder table
+   is distinguishable from a kill for concentration. The enumeration call is indexed and every
+   keyless endpoint refuses it, so the ground-truth provider is written and waiting on
+   `SOLANA_RPC_URL`; the half that does work on the free endpoint — asking the chain which holders
+   are program accounts — shipped and immediately found a vault RugCheck had no label for. One
+   finding worth carrying into step 3: of the 5 safety kills in the current paper session, R5
+   accounts for 5 against R1's 1, so the holder table is where the gate actually binds.
 2. **Time stop and structural exit in Risk.** The exit side is where "it can only be drained"
    actually cashes out, and it is where the desk is currently blind.
 3. **Backfill outcomes** for the 548 kills and 16 scores. First real measurement of whether any
@@ -173,3 +182,12 @@ yet": not a new model on the same six components, but a new column.
 
 Step 4 is the part of the proposal that is genuinely new, and it is last because it is the only one
 that needs the other three to mean anything.
+
+## The venue changes one of the answers
+
+The turnover table above is computed at 1.8% per side, which is this desk's paper fill model on
+Solana. On an exchange the same arithmetic gives 7.0% of capital per year instead of 73%, and the
+drag stops being the thing that decides. [VENUES.md](VENUES.md) works through what else would
+survive the move and what would not — in short, the execution and risk half ports, the eight kill
+rules mostly do not, and the Analyst's score cannot reach its own threshold on data an exchange
+can supply. The first place a CEX earns its keep is sleeve A, which is all venue and no edge.

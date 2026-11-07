@@ -74,6 +74,10 @@ class Safety:
     # more than one network: then it is a lower bound, not a share of supply.
     bundle_pct_is_sum: bool = False
     holders: Optional[int] = None
+    # Which provider answered for the holder table: "rpc", "rugcheck", or "none" when nobody did.
+    # Recorded because R5's verdict reads differently depending on it: "none" means the kill was
+    # about data, not about the coin.
+    holders_source: Optional[str] = None
     notes: list = field(default_factory=list)
 
 

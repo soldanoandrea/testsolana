@@ -8,14 +8,21 @@ from __future__ import annotations
 import time
 
 from .. import rules
+from ..holders import Holders, HolderTable, RugCheckHolders
 from ..http import DataUnavailable
 from ..models import Pair, Safety, Verdict
 
 R = rules
-EXCLUDED_HOLDER_TYPES = {"AMM", "LOCKER"}  # pool vaults / lockers aren't "holders" for concentration
+EXCLUDED_HOLDER_TYPES = {"AMM", "LOCKER"}  # kept: desk/holders.py NOT_A_WALLET is the same set
 
 
-def build_safety(pair: Pair, report: dict, rpc_mint: dict | None, rugged_lookup) -> Safety:
+def rugcheck_only(pair: Pair, report: dict) -> HolderTable:
+    """The holder table the Filter used to build by hand, for callers that pass none."""
+    return Holders([RugCheckHolders()]).table(pair, report)
+
+
+def build_safety(pair: Pair, report: dict, rpc_mint: dict | None, rugged_lookup,
+                 holders: HolderTable | None = None) -> Safety:
     """Turn a RugCheck report (+ optional RPC cross-check) into Safety facts."""
     s = Safety()
     tok = report.get("token") or {}
@@ -44,25 +51,42 @@ def build_safety(pair: Pair, report: dict, rpc_mint: dict | None, rugged_lookup)
     if m and (m.get("lp") or {}).get("lpLockedPct") is not None:
         s.lp_locked_pct = float(m["lp"]["lpLockedPct"])
 
-    # Rules 5, 6, 7 — holders
-    known = report.get("knownAccounts") or {}
-    excluded = {a for a, k in known.items() if (k or {}).get("type") in EXCLUDED_HOLDER_TYPES}
-    excluded.add(pair.pair_address)
-    holders = report.get("topHolders")
+    # Rules 5, 6, 7 — holders. `holders` is a HolderTable (desk/holders.py): the chain when an
+    # endpoint can answer it, RugCheck's own field otherwise, absent when neither could. With no
+    # table the concentration share has no input and R5 kills -- correct, and the reason the
+    # provider chain exists at all, since the kill was a third party's uptime and not the coin.
+    table = holders if holders is not None else rugcheck_only(pair, report)
+    s.holders_source = table.source
+    real = table.wallets          # vaults, bonding curves and lockers already removed
     creator = report.get("creator")
-    if holders is not None:
-        real = [h for h in holders if h.get("owner") not in excluded and h.get("address") not in excluded]
-        real.sort(key=lambda h: float(h.get("pct") or 0), reverse=True)
-        s.top10_pct = sum(float(h.get("pct") or 0) for h in real[:10])
-        s.bundle_pct = sum(float(h.get("pct") or 0) for h in real if h.get("insider"))
-        if creator:
-            via_holders = sum(float(h.get("pct") or 0) for h in real if h.get("owner") == creator)
-            supply = float(tok.get("supply") or 0)
-            via_balance = float(report.get("creatorBalance") or 0) / supply * 100 if supply else 0.0
-            s.dev_pct = max(via_holders, via_balance)
+    supply = float(tok.get("supply") or 0)
+    if table.present:
+        s.top10_pct = sum(h.pct for h in real[:10])
+        if table.insiders_known:
+            s.bundle_pct = sum(h.pct for h in real if h.insider)
+        else:
+            # This provider does not flag insiders, so R7 rests entirely on the network graph
+            # below -- which RugCheck computes independently of the holder table.
+            s.bundle_pct = 0.0
+            s.notes.append(f"insider flags unavailable from {table.source}")
+        if table.excluded:
+            s.notes.append("not holders: " + ", ".join(
+                f"{h.owner[:8]}…{(' ' + h.known) if h.known else ''} {h.pct:.2f}%"
+                for h in table.excluded[:6]))
+    else:
+        s.notes.append(f"no holder table ({table.note})")
+    # The dev's share does not need the holder table: creatorBalance is a share of supply by
+    # itself. This used to sit inside the branch above, so one absent field killed on R6 as well
+    # as on R5 -- two rules reporting the same gap as two independent problems.
+    if creator:
+        via_holders = sum(h.pct for h in real if h.owner == creator) if table.present else 0.0
+        via_balance = None
+        if report.get("creatorBalance") is not None and supply:
+            via_balance = float(report["creatorBalance"]) / supply * 100
+        if via_balance is not None or table.present:
+            s.dev_pct = max(via_holders, via_balance or 0.0)
     # Rule 7 — bundles: wallets RugCheck links into coordinated networks (funded together / bundled buys).
     # Take the larger of: their current holdings across all networks, or insider-flagged top holders.
-    supply = float(tok.get("supply") or 0)
     nets = report.get("insiderNetworks")
     if nets and supply:
         # RugCheck gives each network's holdings but not its wallet list, so a wallet in two
@@ -77,6 +101,12 @@ def build_safety(pair: Pair, report: dict, rpc_mint: dict | None, rugged_lookup)
     elif report.get("graphInsidersDetected") and not nets:
         s.bundle_pct = None   # insiders detected but sizes missing -> can't verify -> Filter kills
         s.notes.append("insiders detected without network sizes")
+    elif "graphInsidersDetected" in report and s.bundle_pct is None:
+        # RugCheck ran its insider graph and found no network. That answer is computed without
+        # `topHolders`, so it still holds when the holder table is absent -- otherwise one missing
+        # field fires R5 and R7 together and reports a single gap as two independent problems.
+        s.bundle_pct = 0.0
+        s.notes.append("no insider network in the graph (holder table absent)")
 
     # Rule 6 — dev history. Check the creator's other launches for rugs (fail closed on lookup error).
     if creator:
@@ -131,9 +161,12 @@ def safety_rules(s: Safety) -> list[tuple[int, str]]:
 
 
 class Filter:
-    def __init__(self, sources, logger, actors=None):
+    def __init__(self, sources, logger, actors=None, holders=None):
         self.src = sources
         self.log = logger
+        # Holder providers, tried in order (desk/holders.py). None = RugCheck's field alone, which
+        # is what the Filter did before there was a chain.
+        self.holders = holders
         # Actor memory. Optional so the Filter can be tested without a store, and because it
         # records and reports only: no rule below reads it, and no verdict depends on it.
         self.actors = actors
@@ -151,7 +184,8 @@ class Filter:
             self.benched.pop(pair.mint, None)
         else:
             self.benched[pair.mint] = time.time() + R.FILTER_BENCH_S
-        self.log.kill(v, permanent=bool(permanent))
+        self.log.kill(v, permanent=bool(permanent),
+                      holders_src=safety.holders_source if safety is not None else None)
         return v
 
     def check(self, pair: Pair) -> Verdict:
@@ -169,7 +203,8 @@ class Filter:
             rpc_mint = self.src.rpc.mint_info(pair.mint)
         except DataUnavailable:
             rpc_mint = None
-        safety = build_safety(pair, report, rpc_mint, self.src.rug.was_rugged)
+        table = self.holders.table(pair, report, rpc_mint) if self.holders else None
+        safety = build_safety(pair, report, rpc_mint, self.src.rug.was_rugged, holders=table)
         # Priors are read BEFORE this look is recorded, so a coin can never be its own prior.
         priors = self.actors.priors(pair.mint, report) if self.actors else None
         if priors is not None and priors.any:
@@ -180,13 +215,14 @@ class Filter:
         else:
             self.log.log("survived_filter", **pair.brief(), top10=safety.top10_pct, dev=safety.dev_pct,
                          bundle=safety.bundle_pct, lp_locked=safety.lp_locked_pct, holders=safety.holders,
-                         notes=safety.notes)
+                         notes=safety.notes, holders_src=safety.holders_source)
             v = Verdict(pair, True, safety=safety)
         if self.actors is not None:
             # Every report the desk paid for is written down, pass or kill. The holder table is
-            # erased by RugCheck once the pool is gone, so this look is the only chance there is.
+            # there or not there by RugCheck's own intermittency, so a look that has one is the
+            # only chance to write it down.
             try:
-                self.actors.record(pair, report, safety, v.rule_name or "SURVIVED")
+                self.actors.record(pair, report, safety, v.rule_name or "SURVIVED", holders=table)
             except OSError as e:
                 self.log.log("error", agent="actors", mint=pair.mint, detail=f"actor record failed: {e}")
         return v

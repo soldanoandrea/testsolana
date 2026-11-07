@@ -1,10 +1,11 @@
 """ACTOR MEMORY: who was behind each coin, written down at the moment the Filter paid for it.
 
 Why this exists as a store and not a lookup. On 2026-11-07 every one of the 67 mints the desk had
-ever seen was re-queried: **none** still returned `topHolders`, and 65 of 67 still returned
-`creator`. RugCheck empties the holder table once a pool is gone, so the wallet-level picture of a
-coin exists only while the coin does. It cannot be fetched later, which means a wallet graph either
-gets written at observation time or never exists at all.
+ever seen was re-queried: **none** returned `topHolders`, and 65 of 67 still returned `creator`.
+The field is not erased when a pool dies -- it comes and goes server-side on live tokens too, see
+desk/holders.py -- so a wallet-level picture cannot be fetched on demand at all. Whatever look
+happens to carry one is the only chance to write it down, which is why this records every report
+the Filter pays for instead of looking things up later.
 
 What an actor is here, and what it is not:
 
@@ -32,9 +33,22 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from .holders import is_program_derived
+
 # Holder types that belong to the market rather than to a person. Mirrors the Filter's own
 # exclusion for concentration rules, for the same reason.
 NOT_AN_ACTOR = {"AMM", "LOCKER"}
+
+
+def _is_actor(owner: str | None, known: str | None) -> bool:
+    """A person's wallet, as opposed to a pool vault, a bonding curve or a locker escrow.
+
+    Two tests, because RugCheck's labels turned out to be incomplete: the label, and whether the
+    address is a point on the ed25519 curve at all (a program-derived address is not -- see
+    desk/holders.py). Derived here at index time rather than stored, so records written before
+    the second test existed are read correctly: persist the input, derive the decision.
+    """
+    return bool(owner) and known not in NOT_AN_ACTOR and not is_program_derived(owner)
 
 
 @dataclass
@@ -113,7 +127,7 @@ class ActorStore:
                 Sighting(ts, mint, sym, "creator", rec.get("creator_pct"), False, verdict))
         for h in rec.get("holders") or []:
             owner, known = h.get("owner"), h.get("known")
-            if not owner or known in NOT_AN_ACTOR:
+            if not _is_actor(owner, known):
                 continue
             self.by_wallet.setdefault(owner, []).append(
                 Sighting(ts, mint, sym, "holder", h.get("pct"), bool(h.get("insider")), verdict))
@@ -121,7 +135,7 @@ class ActorStore:
             if n.get("id"):
                 self.network_ids.setdefault(n["id"], set()).add(mint)
 
-    def priors(self, mint: str, report: dict) -> Priors:
+    def priors(self, mint: str, report: dict, holders=None) -> Priors:
         """Everything already on file about this coin's actors. The coin itself is always excluded,
         so re-looking at the same coin can never manufacture its own prior."""
         with self._lock:
@@ -134,9 +148,11 @@ class ActorStore:
             p.creator_launches_seen = sorted(
                 self.coins[m] for m in launches if m != mint and m in self.coins)
             known = report.get("knownAccounts") or {}
-            for h in report.get("topHolders") or []:
-                owner = h.get("owner")
-                if not owner or (known.get(owner) or {}).get("type") in NOT_AN_ACTOR:
+            rows = ([(h.owner, h.known) for h in holders.holders] if holders is not None
+                    else [(h.get("owner"), (known.get(h.get("owner")) or {}).get("type"))
+                          for h in report.get("topHolders") or []])
+            for owner, label in rows:
+                if not _is_actor(owner, label):
                     continue
                 others = sorted({self.coins.get(s.mint, s.mint)
                                  for s in self.by_wallet.get(owner, []) if s.mint != mint})
@@ -145,28 +161,35 @@ class ActorStore:
             return p
 
     # ---------------------------------------------------------------- writing
-    def record(self, pair, report: dict, safety, verdict: str) -> dict:
+    def record(self, pair, report: dict, safety, verdict: str, holders=None) -> dict:
         """One record per RugCheck report the Filter paid for.
 
         A coin that comes back is written again rather than deduplicated: the *change* is the
         signal. LIA's creator read 32.73% of supply and 81.39% eight minutes later through the
         same code path, and only two records can show that.
         """
-        return self.record_raw(pair.mint, pair.symbol, report, verdict, safety=safety)
+        return self.record_raw(pair.mint, pair.symbol, report, verdict, safety=safety,
+                               holders=holders)
 
     def record_raw(self, mint: str, symbol: str, report: dict, verdict: str,
-                   safety=None, source: str = "live") -> dict:
+                   safety=None, source: str = "live", holders=None) -> dict:
         """The record shape, usable without a Pair or a Safety -- which is what a backfill has."""
         tok = report.get("token") or {}
         supply = float(tok.get("supply") or 0)
         known = report.get("knownAccounts") or {}
-        holders = []
-        for h in report.get("topHolders") or []:
-            owner = h.get("owner")
-            if not owner:
-                continue
-            holders.append({"owner": owner, "pct": h.get("pct"), "insider": bool(h.get("insider")),
-                            "known": (known.get(owner) or {}).get("type")})
+        # A HolderTable if the Filter had one (so an RPC-sourced graph lands here too), otherwise
+        # the report's own field, which is what a backfill has.
+        if holders is not None and holders.present:
+            rows = [{"owner": h.owner, "pct": h.pct, "insider": h.insider, "known": h.known}
+                    for h in holders.holders]
+            holders_source = holders.source
+        else:
+            rows = [{"owner": h.get("owner"), "pct": h.get("pct"),
+                     "insider": bool(h.get("insider")),
+                     "known": (known.get(h.get("owner")) or {}).get("type")}
+                    for h in report.get("topHolders") or [] if h.get("owner")]
+            holders_source = "rugcheck" if rows else (holders.source if holders is not None else "none")
+        holders = rows
         nets = [{"id": n.get("id"), "size": n.get("size"), "type": n.get("type"),
                  "holding_pct": round(float(n.get("currentHolding") or 0) / supply * 100, 4) if supply else None}
                 for n in (report.get("insiderNetworks") or [])]
@@ -182,9 +205,10 @@ class ActorStore:
             # whose pool was empty eight minutes after the desk looked at it.
             "rugcheck_rugged": report.get("rugged"),
             "rugcheck_score": report.get("score_normalised"),
-            "holders": holders,
-            # topHolders is empty once a pool is gone. Recorded explicitly so a backfilled or
-            # late-fetched record is never read as "this coin had no concentrated holders".
+            "holders": holders, "holders_source": holders_source,
+            # A look can carry no holder table at all -- RugCheck's field comes and goes
+            # server-side. Recorded explicitly so such a record is never read as "this coin had
+            # no concentrated holders".
             "holders_erased": not holders,
             "networks": nets, "graph_insiders": report.get("graph_insiders") or report.get("graphInsidersDetected"),
             "total_holders": report.get("totalHolders"),
@@ -223,8 +247,8 @@ def backfill_from_events(store: ActorStore, events: list[dict], rug, sleep_s: fl
 
     This recovers **creators and their launch history, not the wallet graph**. Measured on
     2026-11-07 across the 67 mints the desk had seen: 65 still returned a `creator`, and **zero**
-    still returned `topHolders`. So every record this writes carries `holders_erased: true`, and
-    the cross-coin wallet index necessarily starts from the first live look after this ships.
+    returned `topHolders` on that pass. So every record this writes carries `holders_erased: true`
+    and the cross-coin wallet index starts from the live looks that happen to carry a table.
     """
     seen: dict[str, str] = {}
     verdict: dict[str, str] = {}

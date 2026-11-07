@@ -184,3 +184,43 @@ def test_backfill_survives_a_mint_rugcheck_refuses(store):
               {"event": "kill", "mint": "OK", "symbol": "GOOD", "rule_name": "R3_LIQUIDITY_UNDER_40K"}]
     out = backfill_from_events(store, events, Rug(), sleep_s=0, echo=lambda *a: None)
     assert out["failed"] == 1 and out["recorded"] == 1
+
+
+# ---------------------------------------------------------------- holders from the chain
+def test_the_store_records_wallets_the_rpc_found(store, log):
+    """The wallet graph must populate from whichever provider answered, not from RugCheck only."""
+    from desk.holders import Holders, RpcHolders
+    from test_holders import SUPPLY, WALLET, FakeHolderRPC, acct
+
+    chain = Holders([RpcHolders(FakeHolderRPC(largest=[acct("TA", 90_000_000_000)],
+                                             owners={"TA": WALLET}))])
+    report = make_report(topHolders=None)
+    src = Src(report, rpc={"mintAuthority": None, "freezeAuthority": None, "supply": SUPPLY})
+    Filter(src, log, actors=store, holders=chain).check(make_pair())
+    written = json.loads(store.path.read_text().splitlines()[-1])
+    assert written["holders_source"] == "rpc"
+    assert [h["owner"] for h in written["holders"]] == [WALLET]
+    assert WALLET in store.by_wallet and not written["holders_erased"]
+
+
+def test_the_store_never_indexes_a_program_account_even_unlabelled(store):
+    """PUMP_CURVE was a top holder of Alice with no knownAccounts entry. Indexing it would make
+    the pump.fun bonding curve the most repeated 'actor' the desk has ever seen."""
+    from test_holders import PUMP_CURVE, WALLET
+
+    r = make_report(topHolders=[{"owner": PUMP_CURVE, "address": "A1", "pct": 1.8},
+                                {"owner": WALLET, "address": "A2", "pct": 1.2}], knownAccounts={})
+    rec(store, "M1", "ONE", r)
+    rec(store, "M2", "TWO", r)
+    assert PUMP_CURVE not in store.by_wallet
+    assert store.summary()["repeat_wallets"] == {WALLET: ["M1", "M2"]}
+
+
+def test_priors_read_the_rpc_table_when_there_is_one(store):
+    from desk.holders import Holder, HolderTable
+    from test_holders import WALLET
+
+    rec(store, "M1", "ONE", make_report(topHolders=[{"owner": WALLET, "address": "A", "pct": 4.0}]))
+    table = HolderTable("rpc", (Holder(owner=WALLET, pct=4.0),), present=True)
+    p = store.priors("M2", make_report(topHolders=None), holders=table)
+    assert p.repeat_wallets == {WALLET: ["ONE"]}
