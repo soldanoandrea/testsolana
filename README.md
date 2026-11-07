@@ -594,6 +594,27 @@ Note that `repeat_wallets` was `{}` on FUSE, and that is not a finding: 66 of th
 file carry `holders_erased: true`, so there is no wallet index yet to match against. The creator
 half of the prior works today, the wallet half only starts accumulating from here.
 
+**What the Filter's re-check is worth, measured.** The Analyst sends a coin back through all
+eight rules on fresh data before scoring it, because the observation window is long enough for the
+data the Filter decided on to go stale. Over 23 windows opened so far, 22 of them finished:
+
+| how the window ended | count |
+|---|---|
+| scored | 18 |
+| killed at the re-check, R8 (pump born inside the window) | 3 |
+| killed at the re-check, R3 (liquidity fell) | 1 |
+
+So **4 of 22, 18%**, end with the coin killed on data that arrived during its own window rather
+than being scored — and three of the four are pumps that started while we were watching. `FUSE`
+has been through this twice: observed at 22:43, R8 at 22:49; observed again at 04:24. The step is
+not a formality.
+
+**Eighteen scores, and the gap to the threshold.** Highest 61.2 (`APPLEPAID`), median 36.5, lowest
+24.5. Six landed in the near-miss band, twelve below it, and **none has reached 70**, so the desk
+has never opened a position: the stop, the trail, the position cap and the daily loss limit have
+all been exercised only in tests. The best coin seen in roughly 29 hours of paper was **8.8 points
+short**. Whatever is decided about the bands, that is the number the decision is about.
+
 **Nothing reads this to decide anything.** No rule, no score and no threshold touches the store.
 The Filter logs an `actor_prior` event when a coin's creator or a top-holder wallet is already on
 file, the recap names repeat creators in the morning, and the verdict is whatever the eight rules
