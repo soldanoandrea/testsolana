@@ -626,6 +626,22 @@ than being scored — and three of the four are pumps that started while we were
 has been through this twice: observed at 22:43, R8 at 22:49; observed again at 04:24. The step is
 not a formality.
 
+**The best score the desk ever produced was held back by the momentum fade, not by the coin.**
+`APPLEPAID` scored **61.2** at `chg_h1` **+79.40%/h** — 0.60 points under the line where R8 would
+have killed it outright, and far enough into the fade that momentum paid 10.2 of 20. Holding every
+other input fixed and cooling only the hourly change, the same coin scores **71.0 at +50%/h or
+below, which passes**. Treat that as a sensitivity analysis and not a prediction: a coin at +25%/h
+would not really have had APPLEPAID's volume, liquidity and buyer count. What is not
+counterfactual is the arithmetic — the fade can cost up to 10 points, and the project's best score
+was 8.8 short. The gap to a trade is smaller than the penalty the fade applies.
+
+**`holder_growth` cannot say that holders are leaving.** The curve is `lin(x, 0, 20)`, which clamps
+at zero, so −61%/h and 0%/h score identically. `HODL` was scored at **−61.5%/h** — losing three
+fifths of its holders inside the hour — and totalled **55.0**, which is inside the near-miss band
+and bought it a retry. Five of the six components can distinguish a dying coin from a flat one;
+this is the one that cannot, and it is the component the Analyst spends a 300-second observation
+window to measure.
+
 **Nineteen scores, and the gap to the threshold.** Highest 61.2 (`APPLEPAID`), median 36.5, lowest
 24.5. Six landed in the near-miss band, thirteen below it, and **none has reached 70**, so the desk
 has never opened a position: the stop, the trail, the position cap and the daily loss limit have
