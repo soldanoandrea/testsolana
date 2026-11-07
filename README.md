@@ -478,6 +478,27 @@ Two things follow, and they are why this is written down rather than told as a s
 
 An empty night is the cost of this; LIA is what it buys.
 
+**What R6 could not see, written down later.** The actor store added in `c907d69` recovered LIA's
+creator: **8 launches, and RugCheck still reads `rugged: false`** for it. R6 checks that field, so it
+does not fire on a wallet that has done damage — it fires on a wallet that has already been
+labelled. LIA passed R6 at 12:27 and its pool was empty at 12:35.
+
+The same store produced the measured case for the limit this whole section argues around: one
+creator (`WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh`) is behind **six coins the desk examined** —
+`FI` killed on R5, `HIGH` on R6, `PIRATE` on R4, `FUSE` on R8 and then passed, and `PI` (34.2) and
+`WHITE` (26.6) passed the Filter and were scored on market merit. The same hand was caught by a
+concentration rule, a dev rule and a market rule, and got through three times, and **in none of the
+six did any rule know it was the same hand** — the eight rules read one coin at a time, so an actor
+is invisible to them by construction. Two full Analyst windows were paid for coins from a wallet the
+desk had already killed twice.
+
+How much of that prior works today: the creator half does, and the wallet half does not.
+**66 of the 67 records carry `holders_erased`** — RugCheck's `topHolders` was absent — so there is
+exactly one look's worth of wallet-level data to match against, and `repeat_wallets` comes back
+empty because the index is empty, not because nothing repeats. That is the same shape as the
+smart-wallet list: the creator graph could be backfilled because `creator` survives, the wallet
+graph can only be grown forward from here.
+
 ### Actor memory: who was behind the coin
 
 `desk/actors.py` writes down, at the moment the Filter pays for a RugCheck report, who was behind
