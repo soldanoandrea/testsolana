@@ -301,6 +301,41 @@ wider slippage (6%, then 12%, then 24%, capped there) so exits get out, and the 
 on the position so the next tick carries on widening instead of restarting at 3%. Use a private RPC
 (`SOLANA_RPC_URL`, e.g. Helius) because the public one rate-limits.
 
+### What the live gate proves, and what it does not
+
+The gate is a bug catcher, not an edge test. It is worth keeping as it is, but reading it as
+evidence that the desk is profitable would be a mistake, and the arithmetic says by how much.
+
+Take the prior the score implies: a 70+ coin reaches `RISK_TRAIL_ACTIVATE_PCT` and runs to about
++100% net three times in ten, and stops out at `RISK_STOP_PCT` the other seven, which after 1.8%
+friction per side is about -33%. That prior has a real edge: +6.9% expected per trade, and a
+per-trade standard deviation of 0.61.
+
+Twenty trades cannot see an edge that size. The standard error of the mean over twenty closed
+trades is `0.61/sqrt(20)` = 0.136 — nearly **twice the edge itself**. The t statistic is 0.51. To
+separate +6.9% from zero at two standard errors takes
+
+    n = (2 * sigma / mu)^2 = (2 * 0.61 / 0.069)^2 ~= 312 trades
+
+and the square is what hurts: halve the edge you want to detect and the sample quadruples. Only a
+much fatter edge is cheap to see — at +13.6% per trade it takes 88 trades, still four times the gate.
+
+Worse, the net-profitability condition is close to a coin flip. With `WIN = +1.00` and
+`LOSS = -0.33`, breakeven is a 24.8% win rate, and net profit over twenty trades needs only 5 wins.
+A desk with **exactly zero edge** produces 5 or more wins in twenty trades **57.8%** of the time —
+the right skew of the payoff means a couple of lucky runners carry the sum. So "20 clean trades, net
+positive" is passed more often than not by a desk that has no edge at all.
+
+What the gate does establish is worth having, and it is not nothing: twenty trades opened, monitored
+and closed with zero rule violations and no daily-loss trip means the plumbing works — stops get
+set and respected, fills reconcile, the kill switch is wired, nothing lowers a stop. That is exactly
+the class of failure that would be expensive to discover with real money, and the gate catches it.
+
+It just says nothing about `p * o > 1`. That number is unmeasured as of 2026-11-07: the paper log
+holds 838 scans, 575 scouted coins, 559 kills and 0 fills, across both generations of rules. The
+first live trades should be sized as what they are — the opening of a measurement, not the harvest
+of a proven edge.
+
 ### Open question: "facts about the token" includes three moving numbers
 
 The rationale above says rules 1, 2, 5, 6 and 7 are *facts about the token* and "do not improve", so
