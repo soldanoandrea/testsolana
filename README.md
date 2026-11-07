@@ -203,16 +203,16 @@ contain addresses you have actually verified. So the threshold is 70 of an effec
 the points that exist)**, and the `start` event logs `smart_wallets` so the live count is on the
 record.
 
-**`unique_buyers` is calibrated away from the coins that reach the Analyst.** Measured over the
-three scores of the first paper night:
+**`unique_buyers` is calibrated away from the coins that reach the Analyst.** Measured over all
+**19** scores of the first two paper days:
 
 | component | delivered | saturated | band | observed range |
 |---|---|---|---|---|
-| `unique_buyers` | 69% | **12 of 19** | 50 → 400 buyers | 185 → 4267 |
-| `buy_sell_ratio` | 64% | 9 of 19 | 1.0 → 2.0 | 1.047 → 3.52 |
+| `unique_buyers` | 69% | **12 of 19** | 50 → 400 buyers | 185 → **6193** (14 of 19 had the field) |
+| `buy_sell_ratio` | 64% | 9 of 19 | 1.0 → 2.0 | 1.047 → 3.668 |
 | `liquidity_to_mcap` | 46% | 4 of 19 | 0.05 → 0.20 | 0.039 → **0.428** |
-| `momentum` | 36% | 2 of 19 | see curve | −10.1% → +60.4% |
-| `holder_growth` | 27% | 2 of 19 | 0 → 20%/h | −9.8 → +7.1%/h |
+| `momentum` | 36% | 2 of 19 | see curve | −30.2% → +79.4% (1 h change) |
+| `holder_growth` | 27% | 2 of 19 | 0 → 20%/h | −61.5 → +39.5%/h |
 | `smart_wallets` | 0% | 0 of 19 | own list | empty list, always 0 |
 
 An earlier version of this table was measured on the first **three** scores and is superseded by
@@ -228,9 +228,12 @@ for a different reason: it saturates at a ratio of 2.0 and never looks at the pr
 20/20 on an hour in which `RAMBO` fell 10%. `unique_buyers` itself is not a constant — 15.0, 15.0,
 5.8 — and does discriminate.
 
-`liquidity_to_mcap` is **not** the mirror of this. Its band is reachable: the 56.6 score sat at
-0.108, inside the band, and was paid 5.8/15 for it. Its low aggregate says these coins are thin,
-which is the component working, not a band in the wrong place.
+`liquidity_to_mcap` is **not** the mirror of this. Its band is reachable and reached: it pays across
+the whole observed range (0.039 → 0.428) and **four of 19 coins saturate it** — `APPLEPAID` at
+0.2002, `FUSE` 0.3630, `PI` 0.4168, `WHITE` 0.4284. Note what those four scored: 46.7, 30.8, 34.2
+and 26.6. A pool that is deep relative to the market cap earns the full 15 and predicts nothing
+about the total, which is the component doing its job — it measures the depth of the exit, not the
+return.
 
 With the buyer side delivering ~28 of 35, a pass needs **83% of momentum + liquidity/mcap +
 holder growth** — and no single one of those three is worth enough to supply it. Each is capped at
