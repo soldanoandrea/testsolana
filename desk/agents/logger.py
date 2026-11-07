@@ -71,6 +71,7 @@ class Logger:
         recovered = [e for e in ev if e["event"] == "recovered"]
         a_bench = [e for e in ev if e["event"] == "analyst_bench"]
         expired = [e for e in ev if e["event"] == "bench_expired"]
+        priors = [e for e in ev if e["event"] == "actor_prior"]
         fallbacks = [e for e in ev if e["event"] == "price_fallback"]
         errors = [e for e in ev if e["event"] == "error"]
 
@@ -109,6 +110,23 @@ class Logger:
                      f"**{len(expired)}**"
                      + (f", of which {len(near)} a near miss whose second look never happened"
                         if near else ""))
+        if priors:
+            # Reported, never acted on: no rule reads the actor store. This line exists so a
+            # repeat actor is visible in the morning instead of only in the JSONL.
+            repeat = {}
+            for e in priors:
+                for c in e.get("creator_coins") or []:
+                    repeat.setdefault(e.get("creator") or "?", set()).add(c)
+                repeat.setdefault(e.get("creator") or "?", set()).add(e.get("symbol") or "?")
+            L.append(f"- Coins whose actors the desk had already seen: **{len({e['mint'] for e in priors})}**"
+                     f" ({len(priors)} looks). No verdict used this — it is recorded only.")
+            for creator, coins in sorted(repeat.items(), key=lambda kv: -len(kv[1])):
+                if len(coins) > 1:
+                    L.append(f"  - creator `{creator[:12]}…` seen on {len(coins)}: "
+                             + ", ".join(sorted(coins)))
+            wallets = max((e.get("repeat_wallet_count") or 0) for e in priors)
+            if wallets:
+                L.append(f"  - up to {wallets} top-holder wallet(s) in one coin had been seen on another")
         if fallbacks:
             L.append(f"- Price fallback used (DexScreener missed, Jupiter answered): {len(fallbacks)} tick(s)")
         if blind:

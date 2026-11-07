@@ -15,6 +15,7 @@ from datetime import datetime
 from . import rules
 from .agents.analyst import Analyst
 from .agents.executor import Executor
+from .actors import ActorStore
 from .agents.filter import Filter
 from .agents.logger import Logger
 from .agents.risk import Risk
@@ -88,7 +89,8 @@ class Desk:
         self.last_prices: dict[str, float] = {}
 
         self.scout = Scout(self.src, self.log)
-        self.filter = Filter(self.src, self.log)
+        self.actors = ActorStore(cfg.path("actors.jsonl"))
+        self.filter = Filter(self.src, self.log, actors=self.actors)
         self.filter.dead = self.state.dead            # shared: dead is dead across restarts
         self.filter.benched = self.state.benched      # shared: a bench survives a restart too
         self.scout.benched = self.state.benched

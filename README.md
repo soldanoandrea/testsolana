@@ -477,6 +477,91 @@ Two things follow, and they are why this is written down rather than told as a s
 
 An empty night is the cost of this; LIA is what it buys.
 
+### Actor memory: who was behind the coin
+
+`desk/actors.py` writes down, at the moment the Filter pays for a RugCheck report, who was behind
+the coin: the `creator`, that creator's other launches, and every `topHolders[].owner` with its
+share and insider flag. One record per paid report in `data/<mode>/actors.jsonl`; the indices are
+rebuilt from it in RAM, which is the lesson the bench taught — persist the input, derive the
+decision, because an index on disk whose input is not is what let a benched coin come back with its
+wait ignored.
+
+**`topHolders` is only sometimes there, and that is why this is a store and not a lookup.** On
+2026-11-07 all 67 mints the desk had ever seen were re-queried:
+
+| still returned by RugCheck | coins |
+|---|---|
+| `creator` | **65 of 67** |
+| `topHolders` | **0 of 67** |
+
+The obvious explanation — the holder table is dropped once a pool is gone — does not survive the
+check. `PUMP` (`pumpCmXqMf…`, $22M of liquidity, 1.34M holders) returned **20 `topHolders`** at
+one point in the session and `None` twenty-five minutes later, then `None` on six consecutive
+probes two minutes apart through two different HTTP clients, with `totalHolders` still reading
+1,341,045 throughout. Five live fresh coins ($67k–$410k liquidity) returned `None` in the same
+window. So the field comes and goes server-side, for live tokens as well as dead ones, and nothing
+the desk does changes that.
+
+Whatever the cause, the consequence is the same: **the wallet-level picture of a coin is available
+only sometimes, and cannot be fetched on demand afterwards.** It has to be written down on the look
+that happens to carry it. Every hour the desk ran without this file is an hour of wallet graph that
+is gone for good.
+
+This has a second consequence that is not about the store at all. `top10_pct` is read from
+`topHolders` and nothing else, so whenever the field is absent **R5 is unverifiable and the Filter
+kills every coin that reaches the paid sources** — correctly, by its own fail-closed rule, but for
+a reason that is a third party's intermittency rather than anything about the coin. The desk cannot
+currently tell those two apart; `holders_erased` in the actor record is the first thing that makes
+the difference visible after the fact. The candidate fix is to take the top accounts from the RPC
+(`getTokenLargestAccounts` plus one `getMultipleAccounts` for the owners), which would make R5
+ground truth instead of a third-party field and would populate the actor graph independently. That
+is **not implemented and not verified here**: the public RPC answered 429 on the attempt, and it
+needs a private endpoint to test.
+
+**What an actor is here.** A wallet address is an identity: `creator` and each holder's `owner`
+join across coins, which is the whole point. An insider *network* is not — RugCheck gives it a
+`size`, a `type` and a slug `id` (`peaceful-champagne-stork`) but never its member wallets, so two
+coins' networks cannot be matched by membership. The slugs were checked across all 66 recoverable
+reports and **not one id recurred**, so they are per-report labels. Network shape is recorded as a
+property of the coin and never indexed as an actor. `knownAccounts` entries typed `AMM` or `LOCKER`
+are recorded but excluded from every lookup: the Pump Fun AMM holds a slice of every pumpswap coin,
+so counting it as a repeat actor would bury the real ones. A symbol is not an identity either —
+`MrBeast`, `PIRATE`, `PREDICT`, `USPR` and `BUNNY` each cover two different mints in the log.
+
+**What the backfill recovered, and what it found.** `python -m desk actors --backfill` re-fetched
+every coin already in the event log: 66 of 67 recorded, 1 refused by RugCheck (`MNST`, HTTP 400),
+57 distinct creators — and **three creators the desk had met more than once without knowing**:
+
+| creator | coins the desk judged, separately |
+|---|---|
+| `WLHv2UAZm6z4…` | **FI, FUSE, HIGH, PI, PIRATE, WHITE** |
+| `H56KT11cbihm…` | BUNNY, LEAP, **LIA** |
+| `HLvLuHoRKe4h…` | BUNNY, CORLA |
+
+The first row is the one that costs something. The desk killed `HIGH` **twice on R6** — the dev
+rule — and then, on two other coins from the same wallet, paid for full Analyst observation
+windows and scored them on market merit: `PI` 34.2 and `WHITE` 26.6. `WHITE` never failed a single
+rule. Nothing connected the three, because nothing could.
+
+The second row is worse in a different way. `H56KT11cbihm…` launched `LIA`, whose pool was at $0
+eight minutes after the desk refused it, and has **8 launches** on RugCheck's own count, two of them
+25 minutes apart. Its report still says **`rugged: false`** today. R6's past-rug test reads exactly
+that flag, so the one event the desk witnessed itself — a pool emptied while it watched — is
+invisible to the rule that exists to catch it. The desk's own observation is better evidence here
+than the field it currently trusts, and until now it was thrown away.
+
+**Nothing reads this to decide anything.** No rule, no score and no threshold touches the store.
+The Filter logs an `actor_prior` event when a coin's creator or a top-holder wallet is already on
+file, the recap names repeat creators in the morning, and the verdict is whatever the eight rules
+say. That is deliberate: there is no measured relation yet between a repeat actor and an outcome,
+and this file is what will eventually supply one. Wiring it into R6 on three observations would be
+the same mistake as re-weighting the score on three.
+
+```bash
+python -m desk actors                       # what the store holds, and which actors repeat
+python -m desk actors --backfill            # recover creators for coins already in the log
+```
+
 ### Honest limitations
 - **A −30% stop is not guaranteed on Solana.** There are no native stop orders, so the desk watches
   the price every 10 s and sells with a market swap. A rug or a sharp candle can gap far below the stop.
@@ -497,3 +582,7 @@ An empty night is the cost of this; LIA is what it buys.
 - The bundle and dev-rug checks are only as good as RugCheck's data. When RugCheck is down,
   everything dies (fail closed), so an outage means an empty night, not unsafe trades.
 - Smart wallets means *your* list. Holding the token counts as buying it.
+- **The actor store's wallet graph starts empty and cannot be backfilled.** Creators were recovered
+  for 65 of 67 past coins; holder tables for none. Cross-coin wallet links only exist for coins
+  looked at from now on, and only for the looks where RugCheck actually returns `topHolders` —
+  which it did not, for any token tried, in the second half of this session.

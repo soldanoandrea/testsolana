@@ -131,9 +131,12 @@ def safety_rules(s: Safety) -> list[tuple[int, str]]:
 
 
 class Filter:
-    def __init__(self, sources, logger):
+    def __init__(self, sources, logger, actors=None):
         self.src = sources
         self.log = logger
+        # Actor memory. Optional so the Filter can be tested without a store, and because it
+        # records and reports only: no rule below reads it, and no verdict depends on it.
+        self.actors = actors
         self.dead: set[str] = set()
         self.benched: dict[str, float] = {}     # mint -> earliest retry, market conditions only
 
@@ -167,10 +170,23 @@ class Filter:
         except DataUnavailable:
             rpc_mint = None
         safety = build_safety(pair, report, rpc_mint, self.src.rug.was_rugged)
+        # Priors are read BEFORE this look is recorded, so a coin can never be its own prior.
+        priors = self.actors.priors(pair.mint, report) if self.actors else None
+        if priors is not None and priors.any:
+            self.log.log("actor_prior", mint=pair.mint, symbol=pair.symbol, **priors.brief())
         hits = safety_rules(safety)
         if hits:
-            return self._kill(pair, hits, safety)
-        self.log.log("survived_filter", **pair.brief(), top10=safety.top10_pct, dev=safety.dev_pct,
-                     bundle=safety.bundle_pct, lp_locked=safety.lp_locked_pct, holders=safety.holders,
-                     notes=safety.notes)
-        return Verdict(pair, True, safety=safety)
+            v = self._kill(pair, hits, safety)
+        else:
+            self.log.log("survived_filter", **pair.brief(), top10=safety.top10_pct, dev=safety.dev_pct,
+                         bundle=safety.bundle_pct, lp_locked=safety.lp_locked_pct, holders=safety.holders,
+                         notes=safety.notes)
+            v = Verdict(pair, True, safety=safety)
+        if self.actors is not None:
+            # Every report the desk paid for is written down, pass or kill. The holder table is
+            # erased by RugCheck once the pool is gone, so this look is the only chance there is.
+            try:
+                self.actors.record(pair, report, safety, v.rule_name or "SURVIVED")
+            except OSError as e:
+                self.log.log("error", agent="actors", mint=pair.mint, detail=f"actor record failed: {e}")
+        return v

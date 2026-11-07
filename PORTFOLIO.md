@@ -154,8 +154,15 @@ yet": not a new model on the same six components, but a new column.
 
 ## Sequencing
 
-1. **Persist the actor graph** (creator, funding sets, insider clusters, per-coin, cross-coin).
-   Cheap, uses data already bought, compounds from the first write.
+1. ~~**Persist the actor graph**~~ — **done**, `desk/actors.py`, see
+   [the README section](README.md#actor-memory-who-was-behind-the-coin). It turned out to be more
+   urgent than "cheap and compounding": RugCheck's `topHolders` is intermittently absent — 0 of 67
+   past coins returned one, and a live $22M-liquidity token returned 20 and then none twenty-five
+   minutes later — so the wallet graph can only be written on the looks that happen to carry it,
+   and could never have been backfilled. The creator half was recoverable, and the first thing it
+   showed is one wallet behind six coins the desk had judged separately — killing one on the dev
+   rule and then scoring two others from the same hand. The same intermittency makes R5
+   unverifiable whenever it bites, which is now the strongest argument for step 2.
 2. **Time stop and structural exit in Risk.** The exit side is where "it can only be drained"
    actually cashes out, and it is where the desk is currently blind.
 3. **Backfill outcomes** for the 548 kills and 16 scores. First real measurement of whether any
