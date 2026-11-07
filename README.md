@@ -307,8 +307,11 @@ The rationale above says rules 1, 2, 5, 6 and 7 are *facts about the token* and 
 they kill for good, while 3, 4 and 8 "describe the hour" and bench. Measured against a real case,
 that split does not hold cleanly.
 
-`Degen` was buried permanently at 00:35 on 2026-11-07 with the detail **"top10 25.1% > 25%"**. One
-tenth of a point over the line, and the consequence is absolute: it can never be looked at again.
+`Degen` was buried permanently at 00:35 on 2026-11-07 with the detail **"top10 25.1% > 25%"**, and
+`WEALTH` at 14:10 the same day on **"top10 25.3% > 25%"**. A tenth and three tenths of a point over
+the line, and the consequence is absolute in both cases: neither can ever be looked at again. Those
+are the only two R5 kills of the day where the margin was under a point, and both fell on the far
+side of it.
 But the top 10's share is not a fact like a revoked authority — it is a number that moves every time
 those wallets trade. A coin at 25.1% today can be at 22% tomorrow, which is precisely the argument
 `FILTER_TRANSIENT_RULES` makes for R3.
