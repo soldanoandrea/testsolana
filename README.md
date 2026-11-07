@@ -551,6 +551,28 @@ that flag, so the one event the desk witnessed itself — a pool emptied while i
 invisible to the rule that exists to catch it. The desk's own observation is better evidence here
 than the field it currently trusts, and until now it was thrown away.
 
+**The first live prior, and what it shows.** At 04:24:07 `FUSE` arrived with creator
+`WLHv2UAZ…` already on file for five other coins — `actor_prior` named `[FI, HIGH, PI, PIRATE,
+WHITE]`, with `creator_launches: 0` because RugCheck reported no `creatorTokens` for it. Those six
+coins have been judged by the eight rules six times, with six unrelated outcomes:
+
+| coin | verdict |
+|---|---|
+| `FI` | killed, R5 (top 10 over 25%) |
+| `HIGH` | killed, R6 (dev over 3%) |
+| `PIRATE` | killed, R4 (volume) |
+| `PI`, `WHITE` | survived the Filter |
+| `FUSE` | killed R8 at 04:23, survived at 04:24 — top10 19.93%, dev 0, bundle 0.43% |
+
+So one actor has been caught by a holder-concentration rule, by a dev rule, and by a market rule,
+and has also passed three times — and on none of those six occasions did any rule know it was the
+same actor. The rules read one coin at a time by construction; this is the first measured instance
+of what that costs.
+
+Note that `repeat_wallets` was `{}` on FUSE, and that is not a finding: 66 of the 67 records on
+file carry `holders_erased: true`, so there is no wallet index yet to match against. The creator
+half of the prior works today, the wallet half only starts accumulating from here.
+
 **Nothing reads this to decide anything.** No rule, no score and no threshold touches the store.
 The Filter logs an `actor_prior` event when a coin's creator or a top-holder wallet is already on
 file, the recap names repeat creators in the morning, and the verdict is whatever the eight rules
