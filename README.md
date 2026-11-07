@@ -327,7 +327,7 @@ changes which coins can be traded, and that is not a documentation decision.
 ### A missing buyer count is a silent disqualification
 
 `buyers_h1` comes from GeckoTerminal's hourly pool activity, and over the first day of paper it was
-**absent in 3 of 13 scores (23%)** — `ROCCO` 42.0, `401kinu` 27.9, `WHITE` 26.6. A component with no
+**absent in 5 of the first 18 scores (28%)** — `ROCCO` 42.0, `401kinu` 27.9, `WHITE` 26.6, `DCAT` 47.7, `HODL` 31.6. A component with no
 data scores 0, which is the right rule: the desk never guesses a score upward. But the arithmetic
 of that zero deserves stating plainly.
 
@@ -340,7 +340,7 @@ of that zero deserves stating plainly.
 The threshold is 70, so when both are missing a coin can only pass with a *perfect* score on all
 four remaining components at once — momentum 20/20, buy/sell 20/20, holder growth 15/15 and
 liquidity/mcap 15/15. That is reachable on paper (it totals exactly 70.0 and passes) and not
-reachable in practice: none of the thirteen scores came within 30 points of it.
+reachable in practice: none of the eighteen scores came within 30 points of it.
 
 So for roughly a quarter of the coins that reach the Analyst, the desk is not deciding on the
 market — it is sitting out because a third-party field was unavailable, and the log says
@@ -349,7 +349,7 @@ of an empty wallet list cost more than they appear to, because they are what tur
 hard ceiling at the threshold. And a retry spent on a coin whose buyer count was missing is a
 window, a RugCheck call and an RPC call spent on a verdict that was decided before the look began.
 
-Nothing is changed here: both the zero and the threshold are deliberate, and 13 scores is not enough
+Nothing is changed here: both the zero and the threshold are deliberate, and 18 scores is not enough
 to re-weight anything. It is written down because the shape of the problem — a measurement absent
 rather than bad — is the kind that reads as a market verdict in the log.
 
@@ -364,19 +364,20 @@ Every near miss of the first day of paper:
 | `APPLEPAID` | 61.2 @ 15:26 | 46.7 @ 16:33 | **−14.5** |
 | `401kinu` | 55.1 @ 18:16 | 57.2 @ 19:23 | +2.1 |
 | `401kinu` | 57.2 @ 19:23 | 27.9 @ 20:30 | **−29.3** |
+| `HODL` | 55.0 @ 02:20 | 31.6 @ 03:26 | **−23.4** |
 
-Mean change **−15.3 points**, and none of the four reached 70. Four retries is not evidence, but it
+Mean change **−16.9 points**, and none of the five reached 70. Five retries is not evidence, but it
 has a plausible mechanism behind it: `ANALYST_RETRY_AFTER_S` is an hour, and a coin that was worth a
 near miss is typically an hour into a move. An hour later it is past the peak more often than it is
 consolidating — every one of these was benched with a 1 h change between +55% and +79%, and
 `momentum` was the component that collapsed in all three losing cases, twice to exactly 0.
 
 If that holds, the retry's expected value is **negative**: it spends up to two further 300 s
-observation windows plus RugCheck and the RPC to look at coins that are, on average, 15 points worse
+observation windows plus RugCheck and the RPC to look at coins that are, on average, 17 points worse
 than when they were set aside. The counter-argument is `401kinu`'s +2.1 and the fact that none of
 these entered, so the budget never cost a bad trade — only the calls.
 
-What would settle it: twenty-odd retries, and whether any retry has ever crossed 70. Until then the
+What would settle it: twenty-odd retries, and whether any retry has ever crossed 70. Five in, none has. Until then the
 wait is left at an hour, because shortening it to catch the coin mid-move argues for the opposite of
 what `FILTER_BENCH_S` argues, and both cannot be tuned on four observations.
 
